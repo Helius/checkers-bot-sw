@@ -42,6 +42,7 @@ void printNumb(int16_t numb)
 		uart_putchar(buf[i]);
 		i++;
 	}
+	uart_putchar(' ');
 }
 
 void msg(const char * str)
@@ -50,3 +51,20 @@ void msg(const char * str)
 		uart_putchar(*(str++));
 	}
 }
+
+// 0
+// some var
+// _end
+// free ram
+// __stack (grow to _end)
+
+extern uint8_t _end;
+extern uint8_t __stack;
+
+uint8_t ramUsage()
+{
+	uint16_t a;
+	a =	(100*((uint16_t)&__stack-(uint16_t)&a))/((uint16_t)&__stack-(uint16_t)&_end);
+	return a;
+}
+

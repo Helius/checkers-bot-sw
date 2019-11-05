@@ -4,6 +4,7 @@ char htoa(uint8_t a);
 void printHex(uint8_t value);
 void printNumb(int16_t numb);
 void msg(const char * str);
+uint8_t ramUsage();
 
 // OutPin led(&DDRB, &PORTB, 5);
 class OutPin {
@@ -31,3 +32,4 @@ private:
 	volatile uint8_t * port;
 	int pinM;
 };
+
