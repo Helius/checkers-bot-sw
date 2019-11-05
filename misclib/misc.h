@@ -33,3 +33,32 @@ private:
 	int pinM;
 };
 
+class InPin{
+public:
+	InPin() = delete;
+	InPin(volatile uint8_t * ddr, volatile uint8_t * port, volatile uint8_t * in, int pin)
+		: port(port)
+		, in(in)
+	{
+		setPullUp(false);
+		pinM = 1 << pin;
+		*ddr &= ~pinM;
+	}
+
+	void setPullUp(bool enable)
+	{
+		if(enable) {
+			*port |= pinM;
+		} else {
+			*port &= ~pinM;
+		}
+	}
+	explicit operator bool() {
+		return *in & pinM;
+	}
+private:
+	volatile uint8_t * port;
+	volatile uint8_t * in;
+	int pinM;
+	
+};
