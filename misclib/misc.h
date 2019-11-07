@@ -28,9 +28,12 @@ public:
 	{
 		*port ^= pinM;
 	}
+	bool get() {
+		return *port & pinM;
+	}
 private:
 	volatile uint8_t * port;
-	int pinM;
+	uint8_t pinM;
 };
 
 class InPin{

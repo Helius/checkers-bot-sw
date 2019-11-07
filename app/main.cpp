@@ -6,7 +6,6 @@
 
 #include <util/delay.h>
 #include <stdlib.h>
-#include <math.h>
 
 #include <uart.h>
 #include <misc.h>
@@ -21,39 +20,48 @@ class StepMotor {
 		, clockSource(clockSrc)
 		, value(reg)
 		, tcr(control)
-		{
-		}
+		{}
 
 		bool busy() {
-			return stepCount;
+			return stepCount > 0;
 		}
 
 		void moveAngle(uint8_t angle, bool direction) {
 			if(!busy()) {
+				msg("start\n\r");
+				speedMax = 12;
 				moveSteps(stepsPerAngle(angle), direction);
 			}
 		}
 
-		void onZeroPoint() {
-			// stop timer
-			stopTimer();
-			stepCount = 0;
-			endPoint = 0;
+		void autoHome() {
+			// move slowly until onZeroPoint
+			msg("autohome\n\r");
+			speedMax = 1;
+			uint16_t steps = 2000;
+			moveSteps(steps, 1);
 		}
 
 		void onStepHandler() {
 			uint8_t speed;
-			if(stepCount) {
+			if(!zero && dir.get()) {
+				stopTimer();
+				stepCount = 0;
+				endPoint = 0;
+				msg("zero!\n\r");
+				return;
+			}
+			if(--stepCount) {
 				uint16_t currentStep = endPoint - stepCount;
 				if(currentStep < endPoint/2) {
-					speed = speedMin + fmin(speedMax, currentStep/acc_div);
+					speed = speedMin + min(speedMax, currentStep/acc_div);
 				} else {
-					speed = speedMin + fmin(speedMax, stepCount/acc_div);
+					speed = speedMin + min(speedMax, stepCount/acc_div);
 				}
-				stepCount--;
 				*value = 250/speed;
 			} else {
 				stopTimer();
+				msg("end\n\r");
 			}
 		}
 		
@@ -66,7 +74,10 @@ class StepMotor {
 		}
 		
 		void moveSteps(uint16_t steps, bool direction) {
-			startTimer();
+			if(!zero && direction) {
+				msg("can't start: zero!");
+				return;
+			}
 			endPoint = steps;
 			if(direction) {
 				dir.set();
@@ -74,6 +85,8 @@ class StepMotor {
 				dir.clear();
 			}
 			stepCount = steps;
+			*value = 250/speedMin;
+			startTimer();
 		}
 
 		void stopTimer() {
@@ -84,17 +97,21 @@ class StepMotor {
 			*tcr |= _BV(clockSource); // SCx2
 		}
 
+		uint8_t min(uint8_t a, uint8_t b) {
+			return a > b ? b : a;
+		}
+
 	private:
 		OutPin & dir;
 		InPin & zero;
-		uint16_t stepCount = 0;
 		uint16_t endPoint = 0;
+		uint16_t stepCount = 0;
 		uint8_t clockSource = 2;
 		volatile uint8_t * value;
 		volatile uint8_t * tcr;
 		static constexpr uint8_t speedMin = 2; // x100 pulse per second
-		static constexpr uint8_t speedMax = 12;
-		static constexpr uint8_t acc_div = 30;
+		uint8_t speedMax = 12;
+		static constexpr uint8_t acc_div = 40;
 };
 
 class MecanicalArm {
@@ -104,17 +121,6 @@ class MecanicalArm {
 			, m1(motor1)
 	{}
 	
-		void onZeroPoint(int ind) {
-			switch(ind) {
-				case 0:
-					m0.onZeroPoint();
-					break;
-				case 1:
-					m0.onZeroPoint();
-					break;
-			}
-		}
-
 	private:
 		StepMotor & m0;
 		StepMotor & m1;
@@ -132,26 +138,19 @@ StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
 StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
 MecanicalArm arm(m0, m1);
 
-// ISR Handlers
-ISR(TIMER2_OVF_vect)
-{
-}
-
+/*
 ISR(INT0_vect)
 {
-	//m0.onZeroPoint();
-	int val = !!zero0pin;
-	printNumb(val);
+	m0.onZeroPoint();
 	msg("zero 0\n\r");
 }
 
 ISR(INT1_vect)
 {
-	//m1.onZeroPoint();
-	int val = !!zero1pin;
-	printNumb(val);
+	m1.onZeroPoint();
 	msg("zero 1\n\r");
 }
+*/
 
 OutPin tst(&DDRB, &PORTB, PIN4);
 OutPin t0pin(&DDRD, &PORTD, PIN6);
@@ -159,13 +158,19 @@ OutPin t0pin(&DDRD, &PORTD, PIN6);
 
 ISR(TIMER0_OVF_vect)
 {
-	if(t0value == 1) {
+	static uint8_t value = 0;
+	if(!value) {
+		value = t0value;
+	}
+	if(value == 1) {
 		t0pin.set();
 	} else {
 		t0pin.clear();
 	}
-	if(!t0value--) {
+	value--;
+	if(!value) {
 		m0.onStepHandler();
+		value = t0value;
 	}
 }
 
@@ -177,9 +182,9 @@ ISR(TIMER1_OVF_vect)
 
 int main(void)
 {
-	// setup external interrupt
-	EICRA = (1 << ISC01) | (1 << ISC11);
-	EIMSK = (1 << INT0) | (1 << INT1);
+	// setup external interrupt for endstops
+	//EICRA = (1 << ISC01) | (1 << ISC11);
+	//EIMSK = (1 << INT0) | (1 << INT1);
 	
 	// timer0 has no sutable mode, so do it with simple interrupt
 	TIMSK0 = _BV(TOIE0);
@@ -201,18 +206,33 @@ int main(void)
 	{
 		_delay_ms(500);
 		led.toggle();
-		
-		//while(m0.busy());
-		//while(m1.busy());
-		//m1.moveAngle(30, 0);
+
 		m1.moveAngle(30, 0);
-		m0.moveAngle(30, 1);
+		m0.moveAngle(40, 0);
+		while(m0.busy()) {
+			_delay_ms(100);
+			msg("busy...\n\r");
+		}
+		while(m1.busy()) {
+			_delay_ms(100);
+			msg("busy...\n\r");
+		}
+		m0.autoHome();
+		m1.autoHome();
+		while(m0.busy()) {
+			_delay_ms(100);
+			msg("busy...\n\r");
+		}
+		while(m1.busy()) {
+			_delay_ms(100);
+			msg("busy...\n\r");
+		}
 		//while(m0.busy());
 		//while(m1.busy());
 		//m1.moveAngle(30, 1);
 		_delay_ms(1000);
-		m1.moveAngle(30, 1);
-		m0.moveAngle(30, 0);
+		//m1.moveAngle(30, 1);
+		//m0.moveAngle(20, 0);
 	}
 }
 
