@@ -6,6 +6,7 @@
 
 #include <util/delay.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include <uart.h>
 #include <misc.h>
@@ -23,8 +24,6 @@ class StepMotor {
 		}
 
 		bool busy() {
-			printNumb(stepCount);
-			msg("\n\r");
 			return stepCount;
 		}
 
@@ -42,26 +41,16 @@ class StepMotor {
 		}
 
 		void onStepHandler() {
-			static constexpr uint8_t speedAdd = speedMax - speedMin;
 			uint8_t speed;
 			if(stepCount) {
-				uint16_t currentStep = endPoint-stepCount;
-				if(currentStep < endPoint/4) {
-					speed = speedMin + (speedAdd * currentStep * 4)/endPoint;
-				} else if (currentStep > (3*endPoint)/4) {
-					speed = speedMin + speedAdd - 
-						speedAdd * (4 * (currentStep + 1) - 3 * endPoint) / endPoint;
+				uint16_t currentStep = endPoint - stepCount;
+				if(currentStep < endPoint/2) {
+					speed = 1 + fmin(speedMax, currentStep/acc_div);
 				} else {
-					speed = speedMax;
+					speed = 1 + fmin(speedMax, stepCount/acc_div);
 				}
-				/*
-				printNumb(currentStep);
-				printNumb(endPoint);
-				printNumb(speed);
-				msg("\n\r");
-				*/
 				stepCount--;
-				*value = 300/speed;
+				*value = 250/speed;
 			} else {
 				stopTimer();
 			}
@@ -89,7 +78,7 @@ class StepMotor {
 
 		void stopTimer() {
 			*tcr &= ~_BV(2);
-			*value = 300/speedMin;
+			*value = 250/speedMin;
 		}
 		void startTimer() {
 			*tcr |= _BV(2); // SCx2
@@ -102,10 +91,9 @@ class StepMotor {
 		uint16_t endPoint = 0;
 		volatile uint8_t * value;
 		volatile uint8_t * tcr;
-		// min  = 6 is good but too fast
-		// min  = 4 works but has step miss on load
-		static constexpr uint8_t speedMin = 6; // x100 pulse per second
-		static constexpr uint8_t speedMax = 15;
+		static constexpr uint8_t speedMin = 1; // x100 pulse per second
+		static constexpr uint8_t speedMax = 8;
+		static constexpr uint8_t acc_div = 16;
 };
 
 class MecanicalArm {
@@ -139,7 +127,7 @@ InPin zero0pin(&DDRD, &PORTD, &PIND, PIN2); // ext0 pin
 InPin zero1pin(&DDRD, &PORTD, &PIND, PIN3); // ext1 pin
 
 StepMotor m0(m0dir, zero0pin, &OCR0A, &TCCR0B);
-StepMotor m1(m1dir, zero1pin, &OCR1AL, &TCCR1B);
+StepMotor m1(m1dir, zero1pin, &ICR1L, &TCCR1B);
 MecanicalArm arm(m0, m1);
 
 // ISR Handlers
@@ -176,15 +164,11 @@ ISR(TIMER0_COMPA_vect)
 	toggle = !toggle;
 }
 
-ISR(TIMER1_COMPA_vect)
+ISR(TIMER1_OVF_vect)
 {
-	static bool toggle = 0;
-	if(toggle) {
-		tst.set();
-		m1.onStepHandler();
-		tst.clear();
-	}
-	toggle = !toggle;
+	tst.set();
+	m1.onStepHandler();
+	tst.clear();
 }
 
 
@@ -203,9 +187,11 @@ int main(void)
 	//TCCR0B = _BV(2);
 	
 	DDRB |= _BV(PB1);
-	TCCR1A = _BV(COM1A0);
-	TCCR1B = _BV(WGM12);
-	TIMSK1 = _BV(OCIE1A);
+	OCR1A = 1;
+	ICR1 = 30;
+	TCCR1A = _BV(COM1A1) | _BV(WGM11);
+	TCCR1B = _BV(WGM13) | _BV(WGM12);
+	TIMSK1 = _BV(TOIE1);
 	
 
 	uart_init(0);
@@ -218,20 +204,21 @@ int main(void)
 		_delay_ms(500);
 		led.toggle();
 		
-		while(m0.busy());
-		m0.moveAngle(50, 0);
+		while(m1.busy());
+		m1.moveAngle(50, 0);
 		_delay_ms(500);
-		while(m0.busy());
-		m0.moveAngle(25, 1);
+		while(m1.busy());
+		m1.moveAngle(25, 1);
 		_delay_ms(500);
-		while(m0.busy());
-		m0.moveAngle(15, 1);
+		while(m1.busy());
+		m1.moveAngle(15, 1);
 		_delay_ms(500);
-		while(m0.busy());
-		m0.moveAngle(5, 1);
+		while(m1.busy());
+		m1.moveAngle(5, 1);
 		_delay_ms(500);
-		while(m0.busy());
-		m0.moveAngle(5, 1);
+		while(m1.busy());
+		m1.moveAngle(5, 1);
+		
 	}
 }
 
