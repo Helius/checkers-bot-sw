@@ -14,40 +14,56 @@
 
 class StepMotor {
 	public:
-		StepMotor(OutPin & dirPin, InPin & zeroPin, volatile uint8_t * reg) 
+		StepMotor(OutPin & dirPin, InPin & zeroPin, volatile uint8_t * reg, volatile uint8_t * control) 
 		: dir(dirPin)
 		, zero(zeroPin)
 		, value(reg)
+		, tcr(control)
 		{
 		}
 
 		bool busy() {
+			printNumb(stepCount);
+			msg("\n\r");
 			return stepCount;
 		}
 
 		void moveAngle(uint8_t angle, bool direction) {
 			if(!busy()) {
-				lastAngle = angle;
 				moveSteps(stepsPerAngle(angle), direction);
 			}
 		}
 
-		void moveToHome() {
-			// slow go home until onZeroPoint
-		}
-
 		void onZeroPoint() {
 			// stop timer
+			stopTimer();
 			stepCount = 0;
+			endPoint = 0;
 		}
 
 		void onStepHandler() {
-			if(stepCount--) {
-				// handle timer speed
-				value++;
+			static constexpr uint8_t speedAdd = speedMax - speedMin;
+			uint8_t speed;
+			if(stepCount) {
+				uint16_t currentStep = endPoint-stepCount;
+				if(currentStep < endPoint/4) {
+					speed = speedMin + (speedAdd * currentStep * 4)/endPoint;
+				} else if (currentStep > (3*endPoint)/4) {
+					speed = speedMin + speedAdd - 
+						speedAdd * (4 * (currentStep + 1) - 3 * endPoint) / endPoint;
+				} else {
+					speed = speedMax;
+				}
+				/*
+				printNumb(currentStep);
+				printNumb(endPoint);
+				printNumb(speed);
+				msg("\n\r");
+				*/
+				stepCount--;
+				*value = 300/speed;
 			} else {
-				// done, stop timer
-				value = 0;
+				stopTimer();
 			}
 		}
 		
@@ -60,6 +76,8 @@ class StepMotor {
 		}
 		
 		void moveSteps(uint16_t steps, bool direction) {
+			startTimer();
+			endPoint = steps;
 			if(direction) {
 				dir.set();
 			} else {
@@ -69,12 +87,25 @@ class StepMotor {
 			// start timer
 		}
 
+		void stopTimer() {
+			*tcr &= ~_BV(2);
+			*value = 300/speedMin;
+		}
+		void startTimer() {
+			*tcr |= _BV(2); // SCx2
+		}
+
 	private:
 		OutPin & dir;
 		InPin & zero;
-		uint8_t lastAngle = 0;
 		uint16_t stepCount = 0;
+		uint16_t endPoint = 0;
 		volatile uint8_t * value;
+		volatile uint8_t * tcr;
+		// min  = 6 is good but too fast
+		// min  = 4 works but has step miss on load
+		static constexpr uint8_t speedMin = 6; // x100 pulse per second
+		static constexpr uint8_t speedMax = 15;
 };
 
 class MecanicalArm {
@@ -102,13 +133,13 @@ class MecanicalArm {
 
 // Objects
 OutPin led(&DDRB, &PORTB, PIN5);   // on board led
-OutPin m0dir(&DDRB, &PORTB, PIN0); // PB0 is direction for motor 1
-OutPin m1dir(&DDRD, &PORTD, PIN7); // PD7 is direction for motor 2
+OutPin m0dir(&DDRD, &PORTD, PIN7); // PD7 is direction for motor 2
+OutPin m1dir(&DDRB, &PORTB, PIN0); // PB0 is direction for motor 1
 InPin zero0pin(&DDRD, &PORTD, &PIND, PIN2); // ext0 pin
 InPin zero1pin(&DDRD, &PORTD, &PIND, PIN3); // ext1 pin
 
-StepMotor m0(m0dir, zero0pin, &OCR0A);
-StepMotor m1(m1dir, zero1pin, &OCR1AL);
+StepMotor m0(m0dir, zero0pin, &OCR0A, &TCCR0B);
+StepMotor m1(m1dir, zero1pin, &OCR1AL, &TCCR1B);
 MecanicalArm arm(m0, m1);
 
 // ISR Handlers
@@ -118,7 +149,7 @@ ISR(TIMER2_OVF_vect)
 
 ISR(INT0_vect)
 {
-	m0.onZeroPoint();
+	//m0.onZeroPoint();
 	int val = !!zero0pin;
 	printNumb(val);
 	msg("zero 0\n\r");
@@ -126,7 +157,7 @@ ISR(INT0_vect)
 
 ISR(INT1_vect)
 {
-	m1.onZeroPoint();
+	//m1.onZeroPoint();
 	int val = !!zero1pin;
 	printNumb(val);
 	msg("zero 1\n\r");
@@ -134,23 +165,28 @@ ISR(INT1_vect)
 
 OutPin tst(&DDRB, &PORTB, PIN4);
 
-ISR(TIMER1_COMPA_vect)
-{
-	static bool toggle = 0;
-	if(toggle) {
-		m0.onStepHandler();
-	}
-	toggle = !toggle;
-}
-
 ISR(TIMER0_COMPA_vect)
 {
 	static bool toggle = 0;
 	if(toggle) {
-		m1.onStepHandler();
+		tst.set();
+		m0.onStepHandler();
+		tst.clear();
 	}
 	toggle = !toggle;
 }
+
+ISR(TIMER1_COMPA_vect)
+{
+	static bool toggle = 0;
+	if(toggle) {
+		tst.set();
+		m1.onStepHandler();
+		tst.clear();
+	}
+	toggle = !toggle;
+}
+
 
 int main(void)
 {
@@ -159,16 +195,16 @@ int main(void)
 	EIMSK = (1 << INT0) | (1 << INT1);
 	
 	// timer 0 and 1 init for motors pulse handling
+	// 60..20
+	//OCR0A = 20;
 	DDRD |= _BV(PD6);
-	OCR0A  = 0;
 	TCCR0A = _BV(WGM01) | _BV(COM0A0);
-	TCCR0B = _BV(CS02);
 	TIMSK0 = _BV(OCIE0A);
+	//TCCR0B = _BV(2);
 	
 	DDRB |= _BV(PB1);
-	OCR1A  = 0;
 	TCCR1A = _BV(COM1A0);
-	TCCR1B = _BV(WGM12) | _BV(CS12);
+	TCCR1B = _BV(WGM12);
 	TIMSK1 = _BV(OCIE1A);
 	
 
@@ -176,10 +212,26 @@ int main(void)
 	msg("\n\r\n\rCheckersBot v1.0\n\r\n\r");
 
 	sei();
+
 	while(1)
 	{
-		_delay_ms(200);
+		_delay_ms(500);
 		led.toggle();
+		
+		while(m0.busy());
+		m0.moveAngle(50, 0);
+		_delay_ms(500);
+		while(m0.busy());
+		m0.moveAngle(25, 1);
+		_delay_ms(500);
+		while(m0.busy());
+		m0.moveAngle(15, 1);
+		_delay_ms(500);
+		while(m0.busy());
+		m0.moveAngle(5, 1);
+		_delay_ms(500);
+		while(m0.busy());
+		m0.moveAngle(5, 1);
 	}
 }
 
