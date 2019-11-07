@@ -15,9 +15,10 @@
 
 class StepMotor {
 	public:
-		StepMotor(OutPin & dirPin, InPin & zeroPin, volatile uint8_t * reg, volatile uint8_t * control) 
+		StepMotor(OutPin & dirPin, InPin & zeroPin, uint8_t clockSrc, volatile uint8_t * reg, volatile uint8_t * control) 
 		: dir(dirPin)
 		, zero(zeroPin)
+		, clockSource(clockSrc)
 		, value(reg)
 		, tcr(control)
 		{
@@ -45,9 +46,9 @@ class StepMotor {
 			if(stepCount) {
 				uint16_t currentStep = endPoint - stepCount;
 				if(currentStep < endPoint/2) {
-					speed = 1 + fmin(speedMax, currentStep/acc_div);
+					speed = speedMin + fmin(speedMax, currentStep/acc_div);
 				} else {
-					speed = 1 + fmin(speedMax, stepCount/acc_div);
+					speed = speedMin + fmin(speedMax, stepCount/acc_div);
 				}
 				stepCount--;
 				*value = 250/speed;
@@ -73,15 +74,14 @@ class StepMotor {
 				dir.clear();
 			}
 			stepCount = steps;
-			// start timer
 		}
 
 		void stopTimer() {
-			*tcr &= ~_BV(2);
+			*tcr &= ~_BV(clockSource);
 			*value = 250/speedMin;
 		}
 		void startTimer() {
-			*tcr |= _BV(2); // SCx2
+			*tcr |= _BV(clockSource); // SCx2
 		}
 
 	private:
@@ -89,11 +89,12 @@ class StepMotor {
 		InPin & zero;
 		uint16_t stepCount = 0;
 		uint16_t endPoint = 0;
+		uint8_t clockSource = 2;
 		volatile uint8_t * value;
 		volatile uint8_t * tcr;
-		static constexpr uint8_t speedMin = 1; // x100 pulse per second
-		static constexpr uint8_t speedMax = 8;
-		static constexpr uint8_t acc_div = 16;
+		static constexpr uint8_t speedMin = 2; // x100 pulse per second
+		static constexpr uint8_t speedMax = 12;
+		static constexpr uint8_t acc_div = 30;
 };
 
 class MecanicalArm {
@@ -126,8 +127,9 @@ OutPin m1dir(&DDRB, &PORTB, PIN0); // PB0 is direction for motor 1
 InPin zero0pin(&DDRD, &PORTD, &PIND, PIN2); // ext0 pin
 InPin zero1pin(&DDRD, &PORTD, &PIND, PIN3); // ext1 pin
 
-StepMotor m0(m0dir, zero0pin, &OCR0A, &TCCR0B);
-StepMotor m1(m1dir, zero1pin, &ICR1L, &TCCR1B);
+volatile uint8_t t0value;
+StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
+StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
 MecanicalArm arm(m0, m1);
 
 // ISR Handlers
@@ -152,23 +154,24 @@ ISR(INT1_vect)
 }
 
 OutPin tst(&DDRB, &PORTB, PIN4);
+OutPin t0pin(&DDRD, &PORTD, PIN6);
 
-ISR(TIMER0_COMPA_vect)
+
+ISR(TIMER0_OVF_vect)
 {
-	static bool toggle = 0;
-	if(toggle) {
-		tst.set();
-		m0.onStepHandler();
-		tst.clear();
+	if(t0value == 1) {
+		t0pin.set();
+	} else {
+		t0pin.clear();
 	}
-	toggle = !toggle;
+	if(!t0value--) {
+		m0.onStepHandler();
+	}
 }
 
 ISR(TIMER1_OVF_vect)
 {
-	tst.set();
 	m1.onStepHandler();
-	tst.clear();
 }
 
 
@@ -178,13 +181,8 @@ int main(void)
 	EICRA = (1 << ISC01) | (1 << ISC11);
 	EIMSK = (1 << INT0) | (1 << INT1);
 	
-	// timer 0 and 1 init for motors pulse handling
-	// 60..20
-	//OCR0A = 20;
-	DDRD |= _BV(PD6);
-	TCCR0A = _BV(WGM01) | _BV(COM0A0);
-	TIMSK0 = _BV(OCIE0A);
-	//TCCR0B = _BV(2);
+	// timer0 has no sutable mode, so do it with simple interrupt
+	TIMSK0 = _BV(TOIE0);
 	
 	DDRB |= _BV(PB1);
 	OCR1A = 1;
@@ -204,21 +202,17 @@ int main(void)
 		_delay_ms(500);
 		led.toggle();
 		
-		while(m1.busy());
-		m1.moveAngle(50, 0);
-		_delay_ms(500);
-		while(m1.busy());
-		m1.moveAngle(25, 1);
-		_delay_ms(500);
-		while(m1.busy());
-		m1.moveAngle(15, 1);
-		_delay_ms(500);
-		while(m1.busy());
-		m1.moveAngle(5, 1);
-		_delay_ms(500);
-		while(m1.busy());
-		m1.moveAngle(5, 1);
-		
+		//while(m0.busy());
+		//while(m1.busy());
+		//m1.moveAngle(30, 0);
+		m1.moveAngle(30, 0);
+		m0.moveAngle(30, 1);
+		//while(m0.busy());
+		//while(m1.busy());
+		//m1.moveAngle(30, 1);
+		_delay_ms(1000);
+		m1.moveAngle(30, 1);
+		m0.moveAngle(30, 0);
 	}
 }
 
