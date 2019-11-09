@@ -2,7 +2,7 @@
 
 char htoa(uint8_t a);
 void printHex(uint8_t value);
-void printNumb(int16_t numb);
+void printNumb(uint16_t numb);
 void msg(const char * str);
 uint8_t ramUsage();
 

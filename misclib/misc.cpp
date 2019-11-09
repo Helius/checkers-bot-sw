@@ -33,7 +33,7 @@ void printHex(uint8_t value)
 	uart_putchar(' ');
 }
 
-void printNumb(int16_t numb)
+void printNumb(uint16_t numb)
 {
 	char buf[6] = {0};
 	int i = 0;
