@@ -149,8 +149,8 @@ class MecanicalArm {
 		printNumb(ang1);
 		msg("\n\r");
 		m0.moveAngle(abs(ang0), 0);
-		m1.moveAngle(abs(ang1), (ang1 > 0) ? false : true);
 		m0.wait();
+		m1.moveAngle(abs(ang1), (ang1 > 0) ? false : true);
 		m1.wait();
 		msg("arm: disable motors\n\r");
 		motEn.set();
@@ -191,18 +191,20 @@ class MecanicalArm {
 };
 
 // Objects
-OutPin led(&DDRB, &PORTB, PIN5);   // on board led
-OutPin m0dir(&DDRD, &PORTD, PIN7); // PD7 is direction for motor 2
-OutPin m1dir(&DDRB, &PORTB, PIN0); // PB0 is direction for motor 1
-OutPin motEn(&DDRB, &PORTB, PIN2); // enable morots drivers
-InPin zero0pin(&DDRD, &PORTD, &PIND, PIN2); // ext0 pin
-InPin zero1pin(&DDRD, &PORTD, &PIND, PIN3); // ext1 pin
+OutPin led(&DDRB, &PORTB, PIN5);     // on board led
+OutPin m0dir(&DDRD, &PORTD, PIN7);   // PD7 is direction for motor 2
+OutPin m1dir(&DDRB, &PORTB, PIN0);   // PB0 is direction for motor 1
+OutPin motEn(&DDRB, &PORTB, PIN2);   // enable morots drivers
+OutPin magnito(&DDRC, &PORTC, PIN0); // electro magnet (low: on, hight: off)
+InPin zero0pin(&DDRD, &PORTD, &PIND, PIN2); // zero switch pin (low: pressed)
+InPin zero1pin(&DDRD, &PORTD, &PIND, PIN4); // zero switch pin (low: pressed)
+OutPin servo(&DDRD, &PORTC, PIN3)    // arm servoPin (OC2B)
 
 volatile uint8_t t0value;
 StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
 StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
 
-int lengths[] = {255, 176};
+int lengths[] = {245, 176};
 Fabrik2D fab(3, lengths);
 MecanicalArm arm(m0, m1, motEn);
 
@@ -247,8 +249,6 @@ ISR(TIMER1_OVF_vect)
 	m1.onStepHandler();
 }
 
-float b;
-
 int main(void)
 {
 	// setup external interrupt for endstops
@@ -271,12 +271,10 @@ int main(void)
 
 	sei();
 
-	arm.init();
+	//arm.init();
 	
-	_delay_ms(1000);
-
-	int x = 135;
-	int y = 0;
+	int x = 220;
+	int y = 40;
 	tst.set();
 	fab.setTolerance(0.5);
 	fab.solve(x, y, lengths);
@@ -287,19 +285,27 @@ int main(void)
 	printNumb(180*fab.getAngle(0)/3.14);
 	printNumb(180*fab.getAngle(1)/3.14);
 	msg("\n\r");
-	int32_t ang0 = (1800*fab.getAngle(0))/3.14;
+	int32_t ang0 = 900-(1800*fab.getAngle(0))/3.14;
 	int32_t ang1 = 1800+(1800*fab.getAngle(1))/3.14;
 	tst.clear();
 	msg("angles: ");
 	printNumb(ang0);
 	printNumb(ang1);
+	msg("calc motor ang: ");
+	int16_t a1 = ang0-50;
+	int16_t a2 = ang1-ang0-70;
+	printNumb(a1);
+	printNumb(a2);
 	msg("\n\r move to...\n\r");
-	//arm.move(900-ang0, -ang1);
-	//arm.move(900,0);
+	//50 (5 grad) is a zero angle offset for m0
+	//arm.move(a1, a2);
 	while(1)
 	{
 		led.toggle();
-		_delay_ms(500);
+		magnito.set();
+		_delay_ms(300);
+		magnito.clear();
+		_delay_ms(1000);
 	}
 }
 
