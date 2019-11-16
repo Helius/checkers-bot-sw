@@ -15,7 +15,7 @@
 
 class StepMotor {
 	public:
-		StepMotor(OutPin & dirPin, InPin & zeroPin, uint8_t clockSrc, volatile uint8_t * reg, volatile uint8_t * control) 
+		StepMotor(OutPin & dirPin, InPin & zeroPin, uint8_t clockSrc, volatile uint8_t * reg, volatile uint8_t * control)
 		: dir(dirPin)
 		, zero(zeroPin)
 		, clockSource(clockSrc)
@@ -73,7 +73,7 @@ class StepMotor {
 				stopTimer();
 			}
 		}
-		
+
 	private:
 		// we have gear ratio at 10 and 8*400 steps per rotation;
 		// 32000 steps = 360 grad
@@ -84,7 +84,7 @@ class StepMotor {
 			uint32_t tmp = dAngle*9;
 			return tmp;
 		}
-		
+
 		void moveSteps(uint32_t steps, bool direction) {
 			if(!zero && direction) {
 				msg("moveSteps: fuck off !zero and direction");
@@ -163,7 +163,7 @@ class MecanicalArm {
 		msg("\n\r");
 
 	}
-	
+
 	private:
 	void autoHomeImp() {
 		msg("arm: move both until 0 finish\n\r");
@@ -190,15 +190,89 @@ class MecanicalArm {
 	static constexpr uint8_t m1HomeAngle = 10;
 };
 
+class Servo {
+	public:
+		Servo(OutPin & magnitoPin)
+			: magnito(magnitoPin)
+		{}
+
+		void init() {
+			phase = Up;
+			TCCR2B = mask;
+		}
+
+		bool busy() {
+			return TCCR2B != 0;
+		}
+
+		void grab() {
+			phase = Down;
+			state = Grub;
+			TCCR2B = mask;
+		}
+
+		void put() {
+			phase = Down;
+			state = Put;
+			TCCR2B = mask;
+		}
+
+		void onTick() {
+			static uint8_t delayCnt = 0;
+			delayCnt++;
+			if(delayCnt < 4) {
+				return;
+			}
+			delayCnt = 0;
+
+			if(phase == Up) {
+				if(OCR2B < max) {
+					OCR2B++;
+				} else {
+					// stop timer
+					TCCR2B = 0;
+				}
+			} else {
+				if(OCR2B > min) {
+					OCR2B--;
+				} else {
+					if(state == Grub) {
+						magnito.set();
+					} else {
+						magnito.clear();
+					}
+					phase = Up;
+				}
+			}
+		}
+
+	private:
+		enum MovePhase {
+			Up,
+			Down
+		};
+		enum State {
+			Grub,
+			Put
+		};
+		MovePhase phase;
+		State state;
+		volatile uint8_t * ctl;
+		OutPin & magnito;
+		static constexpr uint8_t min = 15;
+		static constexpr uint8_t max = 34;
+		static constexpr uint8_t mask = _BV(CS22) | _BV(CS21) | _BV(CS20);
+};
+
 // Objects
 OutPin led(&DDRB, &PORTB, PIN5);     // on board led
 OutPin m0dir(&DDRD, &PORTD, PIN7);   // PD7 is direction for motor 2
 OutPin m1dir(&DDRB, &PORTB, PIN0);   // PB0 is direction for motor 1
 OutPin motEn(&DDRB, &PORTB, PIN2);   // enable morots drivers
-OutPin magnito(&DDRC, &PORTC, PIN0); // electro magnet (low: on, hight: off)
 InPin zero0pin(&DDRD, &PORTD, &PIND, PIN2); // zero switch pin (low: pressed)
 InPin zero1pin(&DDRD, &PORTD, &PIND, PIN4); // zero switch pin (low: pressed)
-OutPin servo(&DDRD, &PORTC, PIN3)    // arm servoPin (OC2B)
+OutPin magnito(&DDRC, &PORTC, PIN0); // electro magnet (low: on, hight: off)
+OutPin servoPin(&DDRD, &PORTD, PIN3);   // arm servoPin (OC2B)
 
 volatile uint8_t t0value;
 StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
@@ -206,6 +280,7 @@ StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
 
 int lengths[] = {245, 176};
 Fabrik2D fab(3, lengths);
+Servo servo(magnito);
 MecanicalArm arm(m0, m1, motEn);
 
 /*
@@ -244,6 +319,11 @@ ISR(TIMER0_OVF_vect)
 	}
 }
 
+ISR(TIMER2_OVF_vect)
+{
+	servo.onTick();
+}
+
 ISR(TIMER1_OVF_vect)
 {
 	m1.onStepHandler();
@@ -254,17 +334,22 @@ int main(void)
 	// setup external interrupt for endstops
 	//EICRA = (1 << ISC01) | (1 << ISC11);
 	//EIMSK = (1 << INT0) | (1 << INT1);
-	
-	// timer0 has no sutable mode, so do it with simple interrupt
+
+	// timer0 has no sutable mode, so use simple interrupt for pwm
 	TIMSK0 = _BV(TOIE0);
-	
+
 	DDRB |= _BV(PB1);
 	OCR1A = 1;
 	ICR1 = 30;
 	TCCR1A = _BV(COM1A1) | _BV(WGM11);
 	TCCR1B = _BV(WGM13) | _BV(WGM12);
 	TIMSK1 = _BV(TOIE1);
-	
+
+	// timer for servo
+	TCCR2A = _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
+	TIMSK2 = _BV(TOIE2);
+
+	motEn.set();
 
 	uart_init(0);
 	msg("\n\r\n\rCheckersBot v1.0\n\r\n\r");
@@ -272,7 +357,7 @@ int main(void)
 	sei();
 
 	//arm.init();
-	
+
 	int x = 220;
 	int y = 40;
 	tst.set();
@@ -302,9 +387,15 @@ int main(void)
 	while(1)
 	{
 		led.toggle();
-		magnito.set();
-		_delay_ms(300);
-		magnito.clear();
+		servo.grab();
+		while(servo.busy()) {
+			_delay_ms(100);
+		}
+		_delay_ms(1000);
+		servo.put();
+		while(servo.busy()) {
+			_delay_ms(100);
+		}
 		_delay_ms(1000);
 	}
 }
