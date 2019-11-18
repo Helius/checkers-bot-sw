@@ -73,6 +73,13 @@ class Fabrik2D
 	 */
 	void setTolerance(float tolerance);
 
+	/* createChain(lengths)
+	 * inputs: lengths
+	 *
+	 * length size should always be one lesser than the number of joints
+	 */
+	void createChain(const uint8_t * lengths);
+
   private:
 
 	// Joint struct
@@ -96,13 +103,6 @@ class Fabrik2D
 	float tolerance;
 	// The chain containing joints
 	Chain chain;
-
-	/* createChain(lengths)
-	 * inputs: lengths
-	 *
-	 * length size should always be one lesser than the number of joints
-	 */
-	void createChain(const uint8_t * lengths);
 
 	/* distance(x1,y1,x2,y2)
 	 * inputs: coordinates

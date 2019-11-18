@@ -137,6 +137,7 @@ class Servo {
 
 		void init() {
 			phase = Up;
+			OCR2B = max-2;
 			TCCR2B = mask;
 		}
 
@@ -244,21 +245,21 @@ xOff,yOff | board
 class Board {
 public:
 	// offset from
-	Board(uint8_t x, uint8_t y)
+	Board(uint16_t x, uint16_t y)
 		: offset(x,y)
 	{}
 
 	Point indToPoint(uint8_t ind)
 	{
-		uint8_t row = ind / 8;
-		uint8_t col = ind % 8;
+		uint8_t row = ind*2 / 8;
+		uint8_t col = ind*2 % 8 + (row%2 ? 1 : 0);
 
 		return Point( (7-row)*cellSize + cellSize/2 + margin + offset.x,
-					(col*cellSize) + cellSize/2 + margin + offset.y );
+					(col*cellSize) + cellSize/2 + margin + offset.y);
 	}
 
 private:
-	static constexpr uint16_t size = 325;
+	static constexpr uint16_t size = 290;
 	static constexpr uint8_t margin = 25;
 	static constexpr uint8_t cellSize = 30;
 	const Point offset;
@@ -281,6 +282,7 @@ public:
 	void init() {
 		//TODO: solve Home point to have init angles
 		srv.init();
+//		fab.solve(m0HomeAngle, m1HomeAngle, lengths);
 		motEn.clear();
 		autoHomeImp();
 		motEn.set();
@@ -290,9 +292,10 @@ public:
 	void take(uint8_t ind) {
 		motEn.clear();
 		moveToInd(ind);
-		srv.grabSync();
+		srv.putSync();
+		autoHomeImp();
 		// TODO: have to move outside board and drop peice
-		//moveToInd(-1);
+		//moveToInd(9);
 		//srv.put();
 		motEn.set();
 	}
@@ -314,39 +317,37 @@ private:
 	void moveToInd(uint8_t ind)
 	{
 		Point target = b.indToPoint(ind);
+		msg(">> calc for x,y ");
+		printNumb(ind);
+		printNumb(target.x);
+		printNumb(target.y);
+		fab.createChain(lengths);
 		fab.solve(target.x, target.y, lengths);
 		moveToAng(fab.getAngle(0), fab.getAngle(1));
 	}
 
 	void moveToAng(float angle0, float angle1) {
-		int32_t ang0 = 900-(1800*angle0)/3.14;
-		int32_t ang1 = 1800+(1800*angle1)/3.14;
+		msg(", fabric ang: [");
+		printNumb((180*angle0)/3.14);
+		printNumb((180*angle1)/3.14);
+		msg("] ");
+
+		int32_t ang0 = 900 - (1800*angle0)/3.14 ;
+		int32_t ang1 = ang0 - (1800 + (1800*angle1)/3.14) + 2*m1HomeAngle;
 		msg("angles: ");
 		printNumb(ang0);
 		printNumb(ang1);
-		msg("calc motor ang: ");
-		int16_t a1 = ang0-m0HomeAngle;
-		int16_t a2 = ang1-ang0-m1HomeAngle;
-		printNumb(a1);
-		printNumb(a2);
 		msg("\n\r move to...\n\r");
-
-		motEn.clear();
+		//motEn.clear();
 		msg("waiting for motors !busy\n\r");
 		m0.wait();
 		m1.wait();
-		msg("arm: enable motors, do autohome\n\r");
-		autoHomeImp();
-		msg("arm: move to target");
-		printNumb(ang0);
-		printNumb(ang1);
-		msg("\n\r");
-		m0.moveAngle(abs(ang0), 0);
+		m0.moveAngle(abs(ang0) - 2*m0HomeAngle, 0);
 		m0.wait();
-		m1.moveAngle(abs(ang1), (ang1 > 0) ? false : true);
+		m1.moveAngle(abs(ang1), (ang1 < 0) ? false : true);
 		m1.wait();
 		msg("arm: disable motors\n\r");
-		motEn.set();
+		//motEn.set();
 	}
 
 	void autoHomeImp() {
@@ -374,9 +375,9 @@ private:
 	Board b;
 	const uint8_t lengths[2] = {245, 176};
 	static constexpr int8_t boardOffsetX = 65;
-	static constexpr int8_t boardOffsetY = -105;
-	static constexpr uint8_t m0HomeAngle = 50;
-	static constexpr uint8_t m1HomeAngle = 70;
+	static constexpr int16_t boardOffsetY = -160;
+	static constexpr uint8_t m0HomeAngle = 20;
+	static constexpr uint8_t m1HomeAngle = 20;
 };
 
 // Objects
@@ -470,8 +471,14 @@ int main(void)
 	sei();
 
 	arm.init();
-	arm.move(5,10);
-	arm.take(12);
+//	arm.move(5,10);
+//	for(int i = 0; i < 31; i++) {
+//		arm.take(i);
+//	}
+	arm.take(0);
+	arm.take(3);
+	arm.take(28);
+	arm.take(31);
 
 	while(1)
 	{
