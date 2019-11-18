@@ -1,11 +1,12 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
 
 #include <util/delay.h>
-#include <stdlib.h>
 
 #include <uart.h>
 #include <misc.h>
@@ -127,68 +128,6 @@ class StepMotor {
 		static constexpr uint8_t acc_div = 30;
 };
 
-class MecanicalArm {
-	public:
-		MecanicalArm(StepMotor & motor0, StepMotor & motor1, OutPin & motorEn)
-			: m0(motor0)
-			, m1(motor1)
-			, motEn(motorEn)
-	{
-		motEn.clear();
-	}
-
-	void move(int16_t ang0, int16_t ang1) {
-		motEn.clear();
-		msg("waiting for motors !busy\n\r");
-		m0.wait();
-		m1.wait();
-		msg("arm: enable motors, do autohome\n\r");
-		autoHomeImp();
-		msg("arm: move to target");
-		printNumb(ang0);
-		printNumb(ang1);
-		msg("\n\r");
-		m0.moveAngle(abs(ang0), 0);
-		m0.wait();
-		m1.moveAngle(abs(ang1), (ang1 > 0) ? false : true);
-		m1.wait();
-		msg("arm: disable motors\n\r");
-		motEn.set();
-	}
-
-	void init() {
-		motEn.clear();
-		autoHomeImp();
-		motEn.set();
-		msg("\n\r");
-
-	}
-
-	private:
-	void autoHomeImp() {
-		msg("arm: move both until 0 finish\n\r");
-		m0.moveAngle(1000, 1, 10);
-		m1.moveAngle(1000, 0, 8);
-		m0.wait();
-		m1.stop();
-		msg("arm: ok, stop 1 and move it to zero\n\r");
-		m1.moveAngle(1000, 1, 10);
-		m1.wait();
-		msg("arm: ok, now move both to init pos\n\r");
-		m0.moveAngle(m0HomeAngle, 0);
-		m1.moveAngle(m1HomeAngle, 0);
-		m0.wait();
-		m1.wait();
-		msg("arm: homing done\n\r");
-	}
-	StepMotor & m0;
-	StepMotor & m1;
-	OutPin & motEn;
-	static constexpr uint8_t offsetX = 75;
-	static constexpr uint8_t offsetY = 105;
-	static constexpr uint8_t m0HomeAngle = 10;
-	static constexpr uint8_t m1HomeAngle = 10;
-};
 
 class Servo {
 	public:
@@ -203,6 +142,20 @@ class Servo {
 
 		bool busy() {
 			return TCCR2B != 0;
+		}
+
+		void grabSync() {
+			grab();
+			while(busy()) {
+				_delay_ms(100);
+			}
+		}
+
+		void putSync() {
+			put();
+			while(busy()) {
+				_delay_ms(100);
+			}
 		}
 
 		void grab() {
@@ -264,6 +217,168 @@ class Servo {
 		static constexpr uint8_t mask = _BV(CS22) | _BV(CS21) | _BV(CS20);
 };
 
+class Point {
+public:
+	Point(int16_t xa, int16_t ya)
+	: x(xa)
+	, y(ya)
+	{}
+	int16_t x = 0;
+	int16_t y = 0;
+};
+
+/*
+Coordinate system looks like that:
+		 0,0
+		  o----------------> y
+		  |
+xOff,yOff | board
+   o------|--------
+   |      |        |
+   |      |        |
+		  |
+		  V x
+*/
+
+
+class Board {
+public:
+	// offset from
+	Board(uint8_t x, uint8_t y)
+		: offset(x,y)
+	{}
+
+	Point indToPoint(uint8_t ind)
+	{
+		uint8_t row = ind / 8;
+		uint8_t col = ind % 8;
+
+		return Point( (7-row)*cellSize + cellSize/2 + margin + offset.x,
+					(col*cellSize) + cellSize/2 + margin + offset.y );
+	}
+
+private:
+	static constexpr uint16_t size = 325;
+	static constexpr uint8_t margin = 25;
+	static constexpr uint8_t cellSize = 30;
+	const Point offset;
+};
+
+class MecanicalArm {
+public:
+	MecanicalArm(StepMotor & motor0, StepMotor & motor1, OutPin & motorEn, Servo & servo)
+		: m0(motor0)
+		, m1(motor1)
+		, motEn(motorEn)
+		, srv(servo)
+		, fab(Fabrik2D(3, lengths))
+		, b(boardOffsetX, boardOffsetY) // board offset
+	{
+		fab.setTolerance(0.5);
+		motEn.clear();
+	}
+
+	void init() {
+		//TODO: solve Home point to have init angles
+		srv.init();
+		motEn.clear();
+		autoHomeImp();
+		motEn.set();
+	}
+
+	// take from board peice from ind field
+	void take(uint8_t ind) {
+		motEn.clear();
+		moveToInd(ind);
+		srv.grabSync();
+		// TODO: have to move outside board and drop peice
+		//moveToInd(-1);
+		//srv.put();
+		motEn.set();
+	}
+
+	// move peice from feild to new field
+	void move(uint8_t fromInd, uint8_t toInd)
+	{
+		motEn.clear();
+		moveToInd(fromInd);
+		srv.grabSync();
+		moveToInd(toInd);
+		srv.putSync();
+		autoHomeImp();
+		motEn.set();
+	}
+
+private:
+
+	void moveToInd(uint8_t ind)
+	{
+		Point target = b.indToPoint(ind);
+		fab.solve(target.x, target.y, lengths);
+		moveToAng(fab.getAngle(0), fab.getAngle(1));
+	}
+
+	void moveToAng(float angle0, float angle1) {
+		int32_t ang0 = 900-(1800*angle0)/3.14;
+		int32_t ang1 = 1800+(1800*angle1)/3.14;
+		msg("angles: ");
+		printNumb(ang0);
+		printNumb(ang1);
+		msg("calc motor ang: ");
+		int16_t a1 = ang0-m0HomeAngle;
+		int16_t a2 = ang1-ang0-m1HomeAngle;
+		printNumb(a1);
+		printNumb(a2);
+		msg("\n\r move to...\n\r");
+
+		motEn.clear();
+		msg("waiting for motors !busy\n\r");
+		m0.wait();
+		m1.wait();
+		msg("arm: enable motors, do autohome\n\r");
+		autoHomeImp();
+		msg("arm: move to target");
+		printNumb(ang0);
+		printNumb(ang1);
+		msg("\n\r");
+		m0.moveAngle(abs(ang0), 0);
+		m0.wait();
+		m1.moveAngle(abs(ang1), (ang1 > 0) ? false : true);
+		m1.wait();
+		msg("arm: disable motors\n\r");
+		motEn.set();
+	}
+
+	void autoHomeImp() {
+		msg("arm: move both until 0 finish\n\r");
+		m0.moveAngle(1000, 1, 10);
+		m1.moveAngle(1000, 0, 8);
+		m0.wait();
+		m1.stop();
+		msg("arm: ok, stop 1 and move it to zero\n\r");
+		m1.moveAngle(1000, 1, 10);
+		m1.wait();
+		msg("arm: ok, now move both to init pos\n\r");
+		m0.moveAngle(m0HomeAngle, 0);
+		m1.moveAngle(m1HomeAngle, 0);
+		m0.wait();
+		m1.wait();
+		msg("arm: homing done\n\r");
+	}
+private:
+	StepMotor & m0;
+	StepMotor & m1;
+	OutPin & motEn;
+	Servo & srv;
+	Fabrik2D fab;
+	Board b;
+	const uint8_t lengths[2] = {245, 176};
+	static constexpr int8_t boardOffsetX = 65;
+	static constexpr int8_t boardOffsetY = -105;
+	static constexpr uint8_t m0HomeAngle = 50;
+	static constexpr uint8_t m1HomeAngle = 70;
+};
+
 // Objects
 OutPin led(&DDRB, &PORTB, PIN5);     // on board led
 OutPin m0dir(&DDRD, &PORTD, PIN7);   // PD7 is direction for motor 2
@@ -278,10 +393,8 @@ volatile uint8_t t0value;
 StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
 StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
 
-int lengths[] = {245, 176};
-Fabrik2D fab(3, lengths);
 Servo servo(magnito);
-MecanicalArm arm(m0, m1, motEn);
+MecanicalArm arm(m0, m1, motEn, servo);
 
 /*
 ISR(INT0_vect)
@@ -356,47 +469,14 @@ int main(void)
 
 	sei();
 
-	//arm.init();
+	arm.init();
+	arm.move(5,10);
+	arm.take(12);
 
-	int x = 220;
-	int y = 40;
-	tst.set();
-	fab.setTolerance(0.5);
-	fab.solve(x, y, lengths);
-	msg("for ");
-	printNumb(x);
-	printNumb(y);
-	msg("got ");
-	printNumb(180*fab.getAngle(0)/3.14);
-	printNumb(180*fab.getAngle(1)/3.14);
-	msg("\n\r");
-	int32_t ang0 = 900-(1800*fab.getAngle(0))/3.14;
-	int32_t ang1 = 1800+(1800*fab.getAngle(1))/3.14;
-	tst.clear();
-	msg("angles: ");
-	printNumb(ang0);
-	printNumb(ang1);
-	msg("calc motor ang: ");
-	int16_t a1 = ang0-50;
-	int16_t a2 = ang1-ang0-70;
-	printNumb(a1);
-	printNumb(a2);
-	msg("\n\r move to...\n\r");
-	//50 (5 grad) is a zero angle offset for m0
-	//arm.move(a1, a2);
 	while(1)
 	{
 		led.toggle();
-		servo.grab();
-		while(servo.busy()) {
-			_delay_ms(100);
-		}
-		_delay_ms(1000);
-		servo.put();
-		while(servo.busy()) {
-			_delay_ms(100);
-		}
-		_delay_ms(1000);
+		_delay_ms(500);
 	}
 }
 
