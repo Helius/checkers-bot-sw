@@ -293,7 +293,7 @@ public:
 		motEn.clear();
 		moveToInd(ind);
 		srv.putSync();
-		autoHomeImp();
+		//autoHomeImp();
 		// TODO: have to move outside board and drop peice
 		//moveToInd(9);
 		//srv.put();
@@ -308,7 +308,7 @@ public:
 		srv.grabSync();
 		moveToInd(toInd);
 		srv.putSync();
-		autoHomeImp();
+		//autoHomeImp();
 		motEn.set();
 	}
 
@@ -376,7 +376,7 @@ private:
 	const uint8_t lengths[2] = {245, 176};
 	static constexpr int8_t boardOffsetX = 65;
 	static constexpr int16_t boardOffsetY = -160;
-	static constexpr uint8_t m0HomeAngle = 20;
+	static constexpr uint8_t m0HomeAngle = 60;
 	static constexpr uint8_t m1HomeAngle = 20;
 };
 
@@ -471,14 +471,13 @@ int main(void)
 	sei();
 
 	arm.init();
-//	arm.move(5,10);
-//	for(int i = 0; i < 31; i++) {
-//		arm.take(i);
-//	}
+
 	arm.take(0);
-	arm.take(3);
-	arm.take(28);
-	arm.take(31);
+	//arm.take(0);
+	//arm.take(3);
+	//arm.take(28);
+	//arm.take(31);
+
 
 	while(1)
 	{
