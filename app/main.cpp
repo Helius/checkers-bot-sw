@@ -14,6 +14,9 @@
 
 // Types
 
+Message msg;
+using m = Message;
+
 class StepMotor {
 	public:
 		StepMotor(OutPin & dirPin, InPin & zeroPin, uint8_t clockSrc, volatile uint8_t * reg, volatile uint8_t * control)
@@ -34,16 +37,14 @@ class StepMotor {
 			}
 		}
 
-		void moveAngle(uint16_t dAngle, bool direction, uint8_t speed = MaxSpeed) {
-			msg("moveAngle ");
-			printNumb(dAngle);
-			printNumb(direction);
-			msg("\n\r");
+		void moveAngle(int16_t dAngle, uint8_t speed = MaxSpeed) {
+			bool direction = dAngle > 0 ? 0 : 1;
+			msg << "moveAngle " << dAngle << direction << m::endl;
 			if(!busy() && dAngle) {
 				speedMax = speed;
 				moveSteps(stepsPerDAngle(dAngle), direction);
 			} else {
-				msg("moveAngle: fuckoff, busy\n\r");
+				msg << "moveAngle: fuckoff, busy" << m::endl;
 			}
 		}
 
@@ -56,7 +57,7 @@ class StepMotor {
 		void onStepHandler() {
 			uint8_t speed;
 			if(!zero && dir.get()) {
-				msg("SH: fuck off, !zero\n\r");
+				msg << "!zero" << m::endl;
 				stopTimer();
 				stepCount = 0;
 				endPoint = 0;
@@ -88,7 +89,7 @@ class StepMotor {
 
 		void moveSteps(uint32_t steps, bool direction) {
 			if(!zero && direction) {
-				msg("moveSteps: fuck off !zero and direction");
+				msg << "moveSteps: fuck off !zero and direction" << m::endl;
 				//return;
 			}
 			endPoint = steps;
@@ -265,6 +266,16 @@ private:
 	const Point offset;
 };
 
+class Angles {
+public:
+	Angles(int16_t angle0, int16_t angle1)
+		: ang0(angle0)
+		, ang1(angle1)
+	{}
+	int16_t ang0;
+	int16_t ang1;
+};
+
 class MecanicalArm {
 public:
 	MecanicalArm(StepMotor & motor0, StepMotor & motor1, OutPin & motorEn, Servo & servo)
@@ -280,9 +291,11 @@ public:
 	}
 
 	void init() {
-		//TODO: solve Home point to have init angles
 		srv.init();
-//		fab.solve(m0HomeAngle, m1HomeAngle, lengths);
+		fab.solve(245-176, 0, lengths); // Home point
+		msg << "arm test: " << (573*fab.getAngle(0)/10) << 573*fab.getAngle(1)/10 << m::endl;
+		fab.solve(60, 86, lengths); // Home point
+		msg << "arm init angles: " << (573*fab.getAngle(0)/10) << 573*fab.getAngle(1)/10 << m::endl;
 		motEn.clear();
 		autoHomeImp();
 		motEn.set();
@@ -312,59 +325,58 @@ public:
 		motEn.set();
 	}
 
+	Angles calcAngles(uint8_t ind)
+	{
+		Point target = b.indToPoint(ind);
+		msg << "calc for x,y " << ind << target.x << target.y << m::tab;
+
+		//fab.createChain(lengths);
+		fab.solve(target.x, target.y, lengths);
+
+		msg << "fabric ang: [" << (573*fab.getAngle(0)/10) << (573*fab.getAngle(1)/10) << "] " << m::tab;
+
+		int16_t ang0 = 900 + (573*fab.getAngle(0));
+		int16_t ang1 = ang0 - (1800 + (573*fab.getAngle(1)));
+
+		msg << " angles: " << ang0 << ang1 << m::endl;
+		return {ang0, ang1};
+	}
+
+
 private:
 
 	void moveToInd(uint8_t ind)
 	{
-		Point target = b.indToPoint(ind);
-		msg(">> calc for x,y ");
-		printNumb(ind);
-		printNumb(target.x);
-		printNumb(target.y);
-		fab.createChain(lengths);
-		fab.solve(target.x, target.y, lengths);
-		moveToAng(fab.getAngle(0), fab.getAngle(1));
+		Angles a = calcAngles(ind);
+		moveToAng(a.ang0, a.ang1);
 	}
 
-	void moveToAng(float angle0, float angle1) {
-		msg(", fabric ang: [");
-		printNumb((180*angle0)/3.14);
-		printNumb((180*angle1)/3.14);
-		msg("] ");
-
-		int32_t ang0 = 900 - (1800*angle0)/3.14 ;
-		int32_t ang1 = ang0 - (1800 + (1800*angle1)/3.14) + 2*m1HomeAngle;
-		msg("angles: ");
-		printNumb(ang0);
-		printNumb(ang1);
-		msg("\n\r move to...\n\r");
-		//motEn.clear();
-		msg("waiting for motors !busy\n\r");
+	void moveToAng(int16_t angle0, int16_t angle1) {
+		msg << "waiting for motors !busy" << m::endl;
 		m0.wait();
 		m1.wait();
-		m0.moveAngle(abs(ang0) - 2*m0HomeAngle, 0);
+		m0.moveAngle(angle0);
 		m0.wait();
-		m1.moveAngle(abs(ang1), (ang1 < 0) ? false : true);
+		m1.moveAngle(angle1);
 		m1.wait();
-		msg("arm: disable motors\n\r");
-		//motEn.set();
+		msg << "arm: disable motors" << m::endl;
 	}
 
 	void autoHomeImp() {
-		msg("arm: move both until 0 finish\n\r");
-		m0.moveAngle(1000, 1, 10);
-		m1.moveAngle(1000, 0, 8);
+		msg << "arm: homing" << m::tab;
+		m0.moveAngle(-1000, 10);
+		m1.moveAngle(1000, 8);
 		m0.wait();
 		m1.stop();
-		msg("arm: ok, stop 1 and move it to zero\n\r");
-		m1.moveAngle(1000, 1, 10);
+		msg << " m0 ready;" << m::tab;
+		m1.moveAngle(-1000, 10);
 		m1.wait();
-		msg("arm: ok, now move both to init pos\n\r");
-		m0.moveAngle(m0HomeAngle, 0);
-		m1.moveAngle(m1HomeAngle, 0);
+		msg << " m1 ready" << m::tab;
+		m0.moveAngle(m0HomeAngle);
+		m1.moveAngle(m1HomeAngle);
 		m0.wait();
 		m1.wait();
-		msg("arm: homing done\n\r");
+		msg << " done" << m::endl;
 	}
 private:
 	StepMotor & m0;
@@ -466,13 +478,16 @@ int main(void)
 	motEn.set();
 
 	uart_init(0);
-	msg("\n\r\n\rCheckersBot v1.0\n\r\n\r");
+	msg << m::endl << m::tab << "~ CheckersBot v1.0 ~" << m::endl;
 
 	sei();
 
 	arm.init();
 
-	arm.take(0);
+	arm.calcAngles(0);
+	arm.calcAngles(3);
+	arm.calcAngles(28);
+	arm.calcAngles(31);
 	//arm.take(0);
 	//arm.take(3);
 	//arm.take(28);

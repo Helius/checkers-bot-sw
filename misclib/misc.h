@@ -2,9 +2,53 @@
 
 char htoa(uint8_t a);
 void printHex(uint8_t value);
+/*
 void printNumb(int16_t numb);
 void msg(const char * str);
+void msg(int16_t numb);
+*/
 uint8_t ramUsage();
+
+class Message {
+public:
+	enum M_ {
+		endl,
+		tab
+	};
+
+	Message & operator<<(const char * str) {
+		while(*(str)) {
+			uart_putchar(*(str++));
+		}
+		return *this;
+	}
+
+	Message & operator<<(int16_t numb) {
+		char buf[6] = {0};
+		int i = 0;
+		itoa(numb, buf, 10);
+		while(buf[i] != 0) {
+			uart_putchar(buf[i]);
+			i++;
+		}
+		uart_putchar(' ');
+		return *this;
+	}
+
+	Message & operator<<(M_ m) {
+		switch(m) {
+		case endl:
+			return *this << endlStr;
+
+		case tab:
+			return * this << tabStr;
+		}
+		return *this;
+	}
+
+	static constexpr const char * endlStr = "\n\r";
+	static constexpr const char * tabStr = "\t";
+};
 
 // OutPin led(&DDRB, &PORTB, 5);
 class OutPin {
@@ -22,7 +66,7 @@ public:
 	}
 	void clear()
 	{
-		*port &= ~pinM; 
+		*port &= ~pinM;
 	}
 	void toggle()
 	{
@@ -63,5 +107,5 @@ private:
 	volatile uint8_t * port;
 	volatile uint8_t * in;
 	int pinM;
-	
+
 };

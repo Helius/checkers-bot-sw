@@ -32,7 +32,7 @@ void printHex(uint8_t value)
 	uart_putchar(htoa(l));
 	uart_putchar(' ');
 }
-
+/*
 void printNumb(int16_t numb)
 {
 	char buf[6] = {0};
@@ -45,13 +45,18 @@ void printNumb(int16_t numb)
 	uart_putchar(' ');
 }
 
+void msg(int16_t numb)
+{
+	printNumb(numb);
+}
+
 void msg(const char * str)
 {
 	while(*(str)) {
 		uart_putchar(*(str++));
 	}
 }
-
+*/
 // 0
 // some var
 // _end
