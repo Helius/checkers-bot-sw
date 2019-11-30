@@ -45,26 +45,27 @@ def calcAngle(xt, yt):
         by = y0 - multa
 
     print(ax,ay, bx,by)
-    return int(ax),int(ay),int(bx),int(by)
+    return int(bx),int(by)
 
 
-def check(x, y, x0, y0, x1, y1):
+def check(x, y, x1, y1):
+    print('\n')
     print("check for", x, y)
     value = calcAngle(x, y)
-    if value == (x0, y0, x1, y1):
+    if value == (x1, y1):
         print ("OK")
     else:
-        print("Fuck NO!", value)
+        print("Fuck NO! expected", (x1, y1), "got", value)
 
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
-check(-200, 100, -234, -72, -83, 230);
+check(95,   105, 244, 11)   # 2
+check(100,  230, 222, 103)  # 2
+check(100,  330, 175, 170)  # 2
+check(0,    330, 127, 209) # 2
+check(-100, 330, 50, 239);# 2
+check(-110, 110, 1, 244);  # 2
+check(0,    200, 173, 172);  # 2
+check(-60,  110, 61, 236);  # 2
+check(-170, 110, -51, 238);  # 2
 
 
 #print ("result", ax, ay, bx, by)
