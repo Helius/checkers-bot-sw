@@ -34,41 +34,41 @@ def calcAngle(xt, yt):
     diff = -a/float(b)
     print("diff", -a, b, diff)
 
-    ax = x0 - multb
+    #ax = x0 - multb
     bx = x0 + multb
 
     if diff >= 0:
-        ay = y0 - multa
+        #ay = y0 - multa
         by = y0 + multa
     else:
-        ay = y0 + multa
         by = y0 - multa
 
-    print(ax,ay, bx,by)
-    return int(bx),int(by)
+    print(bx,by)
+
+    # now let's calc angles
+    ang0 = 180*math.atan2(by, bx)/3.14
+    ang1 = 180*math.atan2(yt-by, bx-xt)/3.14
+    print('angles is: ', ang0, ang1)
+
+    return int(bx),int(by),int(ang0),int(ang1)
 
 
-def check(x, y, x1, y1):
+def check(x, y, x1, y1, ang0, ang1):
     print('\n')
-    print("check for", x, y)
+    print("check for", x, y, ang0)
     value = calcAngle(x, y)
-    if value == (x1, y1):
+    if value == (x1, y1, ang0, ang1):
         print ("OK")
     else:
-        print("Fuck NO! expected", (x1, y1), "got", value)
+        print("Fuck NO! expected", (x1, y1, ang0, ang1), "got", value)
 
-check(95,   105, 244, 11)   # 2
-check(100,  230, 222, 103)  # 2
-check(100,  330, 175, 170)  # 2
-check(0,    330, 127, 209) # 2
-check(-100, 330, 50, 239);# 2
-check(-110, 110, 1, 244);  # 2
-check(0,    200, 173, 172);  # 2
-check(-60,  110, 61, 236);  # 2
-check(-170, 110, -51, 238);  # 2
+check(95,   105,   244, 11, 2, 31)
+check(100,  230,   222, 103, 24, 46)
+check(100,  330,   175, 170, 44, 64)
+check(0,    330,   127, 209, 58, 43)  # 2, 58,5
+check(-100, 330,   50, 239, 78, 31);  # 2, 78
+check(-110, 110,   1, 244, 89, -50);   # 2, 89
+check(0,    200,   173, 172, 44, 9); # 2, 45,5
+check(-60,  110,   61, 236, 75, -46);  # 2, 76
+check(-170, 110,   -51, 238, 102, -47); # 2, 102
 
-
-#print ("result", ax, ay, bx, by)
-#print ("angles", 180*math.atan2(ay,ax)/3.14, 180*math.atan2(by,bx)/3.14)
-
-#print(ax-xt,yt-ay, 180*math.atan2(yt-ay, ax-xt)/3.14)

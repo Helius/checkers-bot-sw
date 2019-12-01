@@ -12,8 +12,6 @@
 add_avr_executable(
    checkers
    main.cpp
-   FABRIK2D.h
-   FABRIK2D.cpp
 )
 
 find_library(C_LIB c)

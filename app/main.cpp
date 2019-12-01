@@ -10,9 +10,20 @@
 
 #include <uart.h>
 #include <misc.h>
-#include <FABRIK2D.h>
 
 // Types
+//
+class Angles {
+public:
+	Angles() = default;
+	Angles(int16_t angle0, int16_t angle1)
+		: ang0(angle0)
+		, ang1(angle1)
+	{}
+	int16_t ang0;
+	int16_t ang1;
+};
+
 
 Message msg;
 using m = Message;
@@ -39,12 +50,12 @@ class StepMotor {
 
 		void moveAngle(int16_t dAngle, uint8_t speed = MaxSpeed) {
 			bool direction = dAngle > 0 ? 0 : 1;
-			msg << "moveAngle " << dAngle << direction << m::endl;
+			msg << "moveAngle " << dAngle/10 << direction << "steps " << stepsPerDAngle(abs(dAngle)) << m::endl;
 			if(!busy() && dAngle) {
 				speedMax = speed;
-				moveSteps(stepsPerDAngle(dAngle), direction);
+				moveSteps(stepsPerDAngle(abs(dAngle)), direction);
 			} else {
-				msg << "moveAngle: fuckoff, busy" << m::endl;
+				msg << "moveAngle: busy" << m::endl;
 			}
 		}
 
@@ -89,7 +100,7 @@ class StepMotor {
 
 		void moveSteps(uint32_t steps, bool direction) {
 			if(!zero && direction) {
-				msg << "moveSteps: fuck off !zero and direction" << m::endl;
+				msg << "moveSteps: !zero and direction" << m::endl;
 				//return;
 			}
 			endPoint = steps;
@@ -232,14 +243,14 @@ public:
 /*
 Coordinate system looks like that:
 		 0,0
-		  o----------------> y
+		  o----------------> X
 		  |
 xOff,yOff | board
    o------|--------
    |      |        |
    |      |        |
 		  |
-		  V x
+		  V Y
 */
 
 
@@ -252,11 +263,12 @@ public:
 
 	Point indToPoint(uint8_t ind)
 	{
-		uint8_t row = ind*2 / 8;
-		uint8_t col = ind*2 % 8 + (row%2 ? 1 : 0);
+		uint8_t row = ind % 8;
+		uint8_t col = ind / 8;
 
-		return Point( (7-row)*cellSize + cellSize/2 + margin + offset.x,
-					(col*cellSize) + cellSize/2 + margin + offset.y);
+		return Point(
+			row*cellSize + cellSize/2 + margin + offset.x,
+			size + offset.y - (col*cellSize + cellSize/2 + margin));
 	}
 
 private:
@@ -266,14 +278,49 @@ private:
 	const Point offset;
 };
 
-class Angles {
-public:
-	Angles(int16_t angle0, int16_t angle1)
-		: ang0(angle0)
-		, ang1(angle1)
-	{}
-	int16_t ang0;
-	int16_t ang1;
+class AngleSolver
+{
+	public:
+		Angles solve(int32_t x, int32_t y)
+		{
+			Angles angs;
+			int64_t a = -2*x;
+			int64_t b = -2*y;
+			msg << "solver: check for: " << x << y << m::endl; 
+			int64_t c = x*x + y*y + r02 - r12;
+			int64_t a2b2 = x*x + y*y;
+			a2b2 <<= 2;
+			int64_t x0 = -(a*c)/a2b2;
+			int64_t y0 = -(b*c)/a2b2;
+			msg << "solver: x0, y0: " << x0 << y0 << m::endl;
+			int64_t d = r02 - (c*c)/a2b2;
+			//msg << "d: " << sqrt(d) << m::endl;
+			int64_t multa = sqrt((a*a*d)/a2b2);
+			int64_t multb = sqrt((b*b*d)/a2b2);
+			//msg << "ma, mb: " << multa << multb;
+			bool diff = !((a>=0 && x>=0) || (a<=0 && b<=0));
+			int64_t rx = x0 + multb;
+			int64_t ry = 0;
+
+			msg << "solver: ram usage: " << ramUsage();
+
+			if(diff) {
+				ry = y0 + multa;
+			} else {
+				ry = y0 - multa;
+			}
+			msg << "solver: joint x,y is:" << rx << ry << m::endl; 
+
+			angs.ang0 = 573 * atan2(ry, rx);
+			angs.ang1 = 573 * atan2(y-ry, rx - x);
+
+			msg << "solver: angles:" << angs.ang0 << angs.ang1 << m::endl << m::endl;
+			return angs;
+		}
+		static constexpr uint16_t r0 = 245; 
+		static constexpr uint16_t r1 = 176; 
+		static constexpr uint16_t r02 = r0*r0;
+		static constexpr uint16_t r12 = r1*r1;
 };
 
 class MecanicalArm {
@@ -283,21 +330,28 @@ public:
 		, m1(motor1)
 		, motEn(motorEn)
 		, srv(servo)
-		, fab(Fabrik2D(3, lengths))
 		, b(boardOffsetX, boardOffsetY) // board offset
 	{
-		fab.setTolerance(0.5);
 		motEn.clear();
 	}
 
 	void init() {
 		srv.init();
-		fab.solve(245-176, 0, lengths); // Home point
-		msg << "arm test: " << (573*fab.getAngle(0)/10) << 573*fab.getAngle(1)/10 << m::endl;
-		fab.solve(60, 86, lengths); // Home point
-		msg << "arm init angles: " << (573*fab.getAngle(0)/10) << 573*fab.getAngle(1)/10 << m::endl;
 		motEn.clear();
 		autoHomeImp();
+		motEn.set();
+	}
+
+	void test() {
+		motEn.clear();
+		moveToInd(6);
+		srv.putSync();
+		moveToInd(7);
+		srv.putSync();
+		//moveToInd(56);
+		//srv.putSync();
+		//moveToInd(63);
+		//srv.putSync();
 		motEn.set();
 	}
 
@@ -328,18 +382,7 @@ public:
 	Angles calcAngles(uint8_t ind)
 	{
 		Point target = b.indToPoint(ind);
-		msg << "calc for x,y " << ind << target.x << target.y << m::tab;
-
-		//fab.createChain(lengths);
-		fab.solve(target.x, target.y, lengths);
-
-		msg << "fabric ang: [" << (573*fab.getAngle(0)/10) << (573*fab.getAngle(1)/10) << "] " << m::tab;
-
-		int16_t ang0 = 900 + (573*fab.getAngle(0));
-		int16_t ang1 = ang0 - (1800 + (573*fab.getAngle(1)));
-
-		msg << " angles: " << ang0 << ang1 << m::endl;
-		return {ang0, ang1};
+		return solver.solve(target.x, target.y);
 	}
 
 
@@ -352,13 +395,15 @@ private:
 	}
 
 	void moveToAng(int16_t angle0, int16_t angle1) {
-		msg << "waiting for motors !busy" << m::endl;
+		msg << "\n\rarm: move to " << angle0/10 << angle1/10 << ", from " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
 		m0.wait();
 		m1.wait();
-		m0.moveAngle(angle0);
+		m0.moveAngle(angle0 - currentAng.ang0);
 		m0.wait();
-		m1.moveAngle(angle1);
+		m1.moveAngle(angle1 - currentAng.ang1);
 		m1.wait();
+		currentAng = Angles(angle0, angle1);
+		msg << "arm: new positions is " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
 		msg << "arm: disable motors" << m::endl;
 	}
 
@@ -368,26 +413,28 @@ private:
 		m1.moveAngle(1000, 8);
 		m0.wait();
 		m1.stop();
-		msg << " m0 ready;" << m::tab;
+		msg << "arm: m0 ready;" << m::tab;
 		m1.moveAngle(-1000, 10);
 		m1.wait();
-		msg << " m1 ready" << m::tab;
+		msg << "arm: m1 ready" << m::tab;
 		m0.moveAngle(m0HomeAngle);
 		m1.moveAngle(m1HomeAngle);
 		m0.wait();
 		m1.wait();
-		msg << " done" << m::endl;
+		currentAng = Angles(2*m0HomeAngle, 2*m1HomeAngle);
+		msg << "arm: done" << m::endl;
 	}
 private:
 	StepMotor & m0;
 	StepMotor & m1;
 	OutPin & motEn;
 	Servo & srv;
-	Fabrik2D fab;
 	Board b;
+	AngleSolver solver;
+	Angles currentAng;
 	const uint8_t lengths[2] = {245, 176};
-	static constexpr int8_t boardOffsetX = 65;
-	static constexpr int16_t boardOffsetY = -160;
+	static constexpr int8_t boardOffsetY = 65;
+	static constexpr int16_t boardOffsetX = -160;
 	static constexpr uint8_t m0HomeAngle = 60;
 	static constexpr uint8_t m1HomeAngle = 20;
 };
@@ -484,15 +531,24 @@ int main(void)
 
 	arm.init();
 
-	arm.calcAngles(0);
-	arm.calcAngles(3);
-	arm.calcAngles(28);
-	arm.calcAngles(31);
-	//arm.take(0);
+	arm.test();
+	//arm.take(20);
 	//arm.take(3);
 	//arm.take(28);
 	//arm.take(31);
-
+	
+	/* solver test
+	AngleSolver solver;
+	solver.solve(95,   105);
+	solver.solve(100,  230);
+	solver.solve(100,  330);
+	solver.solve(0,    330);
+	solver.solve(-100, 330);
+	solver.solve(-110, 110);
+	solver.solve(0,    200);
+	solver.solve(-60,  110);
+	solver.solve(-170, 110);
+	*/
 
 	while(1)
 	{

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stdlib.h>
+#include <uart.h>
+
 char htoa(uint8_t a);
 void printHex(uint8_t value);
 /*
@@ -34,7 +37,7 @@ public:
 		uart_putchar(' ');
 		return *this;
 	}
-
+	
 	Message & operator<<(M_ m) {
 		switch(m) {
 		case endl:

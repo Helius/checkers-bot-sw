@@ -46,6 +46,7 @@ class Fabrik2D
 	 *
 	 * solves the inverse kinematics of the stored chain to reach the target
 	 */
+	void printChain();
 	bool solve(float x, float y, const uint8_t * lengths);
 
 	/* getX(joint)

@@ -1,4 +1,3 @@
-#include <stdlib.h>
 #include <uart.h>
 #include <misc.h>
 

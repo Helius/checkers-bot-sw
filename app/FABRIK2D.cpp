@@ -26,7 +26,11 @@
 
 #include <math.h>
 #include "FABRIK2D.h"
+#include <misc.h>
 
+namespace {
+Message msg;
+}
 /* Fabrik2D(numJoints, lengths)
  * inputs: numJoints, lengths
  *
@@ -64,6 +68,13 @@ void Fabrik2D::createChain(const uint8_t * lengths)
 	this->chain = chain;
 }
 
+void Fabrik2D::printChain ()
+{
+	for(int i = 0; i < numJoints - 1; ++i) {
+		msg << "FAB: j " << i << ":" << chain.joints[i].x << chain.joints[i].y << (uint16_t)(chain.joints[i].angle*180)/3.14 << Message::endl;
+	}
+}
+
 /* solve(x, y, lengths)
  * inputs: x and y positions of target, lengths between each joint
  *
@@ -71,7 +82,6 @@ void Fabrik2D::createChain(const uint8_t * lengths)
  */
 bool Fabrik2D::solve(float x, float y, const uint8_t * lengths)
 {
-
 	// Distance between root and target (root is always 0,0)
 	int dist = sqrt(x*x+y*y);
 
@@ -124,6 +134,7 @@ bool Fabrik2D::solve(float x, float y, const uint8_t * lengths)
 
 			prevDif = dif;
 
+			msg << "Fab: forward" << Message::endl;
 			// STAGE 1: FORWARD REACHING
 			// Set the end effector as target
 			chain.joints[this->numJoints-1].x = x;
@@ -144,8 +155,10 @@ bool Fabrik2D::solve(float x, float y, const uint8_t * lengths)
 				// Find the new joint positions
 				chain.joints[i].x = (float)((1-lambda_i)*nx + lambda_i*jx);
 				chain.joints[i].y = (float)((1-lambda_i)*ny + lambda_i*jy);
+				printChain();
 			}
 
+			msg << "Fab: backward" << Message::endl;
 			// STAGE 2: BACKWARD REACHING
 			// Set the root at its initial position
 			chain.joints[0].x = bx;
@@ -166,6 +179,7 @@ bool Fabrik2D::solve(float x, float y, const uint8_t * lengths)
 				// Find the new joint positions
 				chain.joints[i+1].x = (float)((1-lambda_i)*nx + lambda_i*jx);
 				chain.joints[i+1].y = (float)((1-lambda_i)*ny + lambda_i*jy);
+				printChain();
 			}
 
 			// Update distance between end effector and target
@@ -174,9 +188,10 @@ bool Fabrik2D::solve(float x, float y, const uint8_t * lengths)
 			dif = distance(ex,ey,x,y);
 		}
 	}
+	msg << "FAB: solved" << Message::endl;
 
-
-	chain.joints[0].angle = atan2(this->chain.joints[1].y,this->chain.joints[1].x);
+	chain.joints[0].angle = atan2(this->chain.joints[1].y, this->chain.joints[1].x);
+	printChain();
 
 	float prevAngle = chain.joints[0].angle;
 	for (int i = 2; i <= numJoints-1; i++)
@@ -191,6 +206,7 @@ bool Fabrik2D::solve(float x, float y, const uint8_t * lengths)
 		chain.joints[i-1].angle = aAngle-prevAngle;
 
 		prevAngle = aAngle;
+		printChain();
 	}
 
 	return true;
