@@ -343,15 +343,42 @@ public:
 	}
 
 	void test() {
+
 		motEn.clear();
-		moveToInd(6);
+
+		//moveToPoint(-176,245);
+/*		
+		int16_t diff0 = 450 - currentAng.ang0;
+		int16_t diff1 = 0 - currentAng.ang1;
+		m0.moveAngle(diff0);
+		m0.wait();
+		m1.moveAngle(diff1);
+		m1.wait();
+
+		while(){
+			uint8_t ind = rand() % 64;
+			moveToInd(ind);
+			srv.putSync();
+		}
+*/
+/*		
+		moveToInd(0);
 		srv.putSync();
 		moveToInd(7);
 		srv.putSync();
-		//moveToInd(56);
-		//srv.putSync();
-		//moveToInd(63);
-		//srv.putSync();
+		moveToInd(56);
+		srv.putSync();
+		moveToInd(63);
+		srv.putSync();
+		moveToInd(56);
+		srv.putSync();
+		moveToInd(8);
+		srv.putSync();
+		moveToInd(63);
+		srv.putSync();
+		moveToInd(56);
+		srv.putSync();
+*/
 		motEn.set();
 	}
 
@@ -359,10 +386,10 @@ public:
 	void take(uint8_t ind) {
 		motEn.clear();
 		moveToInd(ind);
-		srv.putSync();
+		srv.grabSync();
 		//autoHomeImp();
 		// TODO: have to move outside board and drop peice
-		//moveToInd(9);
+		moveToInd(63);
 		//srv.put();
 		motEn.set();
 	}
@@ -375,6 +402,7 @@ public:
 		srv.grabSync();
 		moveToInd(toInd);
 		srv.putSync();
+		_delay_ms(300);
 		//autoHomeImp();
 		motEn.set();
 	}
@@ -390,17 +418,26 @@ private:
 
 	void moveToInd(uint8_t ind)
 	{
+		msg << "== move to ind " << ind << m::endl;
 		Angles a = calcAngles(ind);
 		moveToAng(a.ang0, a.ang1);
 	}
 
+	void moveToPoint(int16_t x, int16_t y)
+	{
+		Angles a = solver.solve(x, y);
+		moveToAng(a.ang0, a.ang1);
+	}
+
 	void moveToAng(int16_t angle0, int16_t angle1) {
-		msg << "\n\rarm: move to " << angle0/10 << angle1/10 << ", from " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
+		msg << "arm: move to " << angle0/10 << angle1/10 << ", from " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
 		m0.wait();
 		m1.wait();
-		m0.moveAngle(angle0 - currentAng.ang0);
+		int16_t diff0 = angle0 - currentAng.ang0;
+		int16_t diff1 = angle1 - currentAng.ang1;
+		m0.moveAngle(diff0);
+		m1.moveAngle(diff1);
 		m0.wait();
-		m1.moveAngle(angle1 - currentAng.ang1);
 		m1.wait();
 		currentAng = Angles(angle0, angle1);
 		msg << "arm: new positions is " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
@@ -435,9 +472,148 @@ private:
 	const uint8_t lengths[2] = {245, 176};
 	static constexpr int8_t boardOffsetY = 65;
 	static constexpr int16_t boardOffsetX = -160;
-	static constexpr uint8_t m0HomeAngle = 60;
-	static constexpr uint8_t m1HomeAngle = 20;
+	static constexpr uint8_t m0HomeAngle = 56;
+	static constexpr uint8_t m1HomeAngle = 5;
 };
+
+uint8_t spi_read()
+{
+   SPDR = 0;
+   /* Wait for reception complete */
+   while (!(SPSR & (1<<SPIF)));
+   /* Return data register */
+   return SPDR;
+}
+
+OutPin eyesLoad(&DDRC, &PORTC, PIN4);
+
+void spi_send16(uint8_t addr, uint8_t data)
+{
+	_delay_ms(1);
+	eyesLoad.clear();
+	SPDR = addr;
+	while (!(SPSR & (1<<SPIF)));
+
+	SPDR = data;
+	while (!(SPSR & (1<<SPIF)));
+
+	SPDR = addr;
+	while (!(SPSR & (1<<SPIF)));
+
+	SPDR = data;
+	while (!(SPSR & (1<<SPIF)));
+	eyesLoad.set();
+	_delay_ms(1);
+}
+
+uint8_t swap(uint8_t b)
+{
+   b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+   b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+   b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
+   return b;
+}
+
+void spi_send16_sym(uint8_t addr, uint8_t data)
+{
+	_delay_ms(1);
+	eyesLoad.clear();
+	SPDR = addr;
+	while (!(SPSR & (1<<SPIF)));
+
+	SPDR = data;
+	while (!(SPSR & (1<<SPIF)));
+
+	SPDR = addr;
+	while (!(SPSR & (1<<SPIF)));
+
+	SPDR = swap(data);
+	while (!(SPSR & (1<<SPIF)));
+	eyesLoad.set();
+	_delay_ms(1);
+}
+
+class Eyes {
+	public:
+		void init()
+		{
+			/*
+			// "Нормальный" режим работы, не "Тест"
+			SendDataSPI2(0x0F00);
+			// "Нормальный" режим работы, не "Спящий"
+			SendDataSPI2(0x0C01);
+			// Максимальная яркость
+			SendDataSPI2(0x0A0F);
+			// Активные все 8 индикаторов
+			SendDataSPI2(0x0B07);
+			// "Режим без декодирования"
+			SendDataSPI2(0x0900); 
+			*/
+			spi_send16(0x0A, 0x02);
+			spi_send16(0x0B, 0x07);
+			spi_send16(0x0C, 0x01);
+			spi_send16(0x0F, 0x00);
+			spi_send16(0x09, 0x00);
+		}
+
+		void clear()
+		{
+			for(int i = 1; i < 9; ++i)
+			{
+				spi_send16(i, 0);
+			}
+		}
+		void test(uint8_t data) {
+			for(int i = 1; i < 9; i++)
+			{
+				spi_send16_sym(i, eyes_set[3][8-i]);
+			}
+		}
+private:
+		uint8_t eyes_set[4][8] =
+		{{
+			0b11111111,
+			0b00000000,
+			0b00001100,
+			0b00011110,
+			0b00011110,
+			0b00001100,
+			0b00000000,
+			0b00000000,
+		},
+		{ // удивление
+			0b11111111,
+			0b00000000,
+			0b00111100,
+			0b00100100,
+			0b00100100,
+			0b00111100,
+			0b00000000,
+			0b00000000,
+		},
+		{ // ярость
+			0b11100000,
+			0b00011100,
+			0b00000011,
+			0b00000000,
+			0b00001110,
+			0b00001110,
+			0b00001110,
+			0b00000000,
+		},
+		{ // подозрительность
+			0b00000000,
+			0b00000000,
+			0b11111111,
+			0b00100100,
+			0b00100100,
+			0b11111111,
+			0b00000000,
+			0b00000000,
+		}
+		};
+};
+
 
 // Objects
 OutPin led(&DDRB, &PORTB, PIN5);     // on board led
@@ -448,6 +624,7 @@ InPin zero0pin(&DDRD, &PORTD, &PIND, PIN2); // zero switch pin (low: pressed)
 InPin zero1pin(&DDRD, &PORTD, &PIND, PIN4); // zero switch pin (low: pressed)
 OutPin magnito(&DDRC, &PORTC, PIN0); // electro magnet (low: on, hight: off)
 OutPin servoPin(&DDRD, &PORTD, PIN3);   // arm servoPin (OC2B)
+OutPin boardLoad(&DDRC, &PORTC, PIN1);
 
 volatile uint8_t t0value;
 StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
@@ -455,7 +632,7 @@ StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
 
 Servo servo(magnito);
 MecanicalArm arm(m0, m1, motEn, servo);
-
+Eyes eyes;
 /*
 ISR(INT0_vect)
 {
@@ -523,19 +700,33 @@ int main(void)
 	TIMSK2 = _BV(TOIE2);
 
 	motEn.set();
+	eyesLoad.set();
+	
+	// init spi for checkers board and eyes
+	InPin miso(&DDRB, &PORTB, &PINB, PIN4);
+	OutPin mosi(&DDRB, &PORTB, PIN3);
+	OutPin sck(&DDRB, &PORTB, PIN5);
+	SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR1); // enable SPI, MASTER mode, prescaler 1/v	
 
 	uart_init(0);
 	msg << m::endl << m::tab << "~ CheckersBot v1.0 ~" << m::endl;
 
 	sei();
 
-	arm.init();
-
-	arm.test();
-	//arm.take(20);
-	//arm.take(3);
-	//arm.take(28);
-	//arm.take(31);
+	eyes.init();
+	eyes.clear();
+	_delay_ms(1000);
+	//arm.init();
+	/*
+	while(0) {
+		arm.move(0,63);
+		_delay_ms(500);
+		arm.move(63,0);
+		_delay_ms(500);
+		arm.move(0,63);
+		_delay_ms(500);
+	}
+	*/
 	
 	/* solver test
 	AngleSolver solver;
@@ -549,11 +740,32 @@ int main(void)
 	solver.solve(-60,  110);
 	solver.solve(-170, 110);
 	*/
+	uint8_t i = 0;
+	while(1)
+	{
+		i = (i+1)%8;
+		eyes.test(1<<i);
+		_delay_ms(300);
+		
+	}
 
 	while(1)
 	{
 		led.toggle();
-		_delay_ms(500);
+		_delay_ms(1000);
+
+		boardLoad.set();
+		uint8_t d[4] = {0};
+		for(int i = 0; i < 4; ++i) {
+			d[i] = spi_read();
+		}
+		boardLoad.clear();
+		msg << "spi: ";
+		printHex(d[0]);	
+		printHex(d[1]);	
+		printHex(d[2]);	
+		printHex(d[3]);	
+		msg << m::endl;
 	}
 }
 
