@@ -5,11 +5,14 @@
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
+#include <avr/eeprom.h>
 
 #include <util/delay.h>
 
 #include <uart.h>
 #include <misc.h>
+
+#include <checkers.h>
 
 // Types
 //
@@ -254,10 +257,10 @@ xOff,yOff | board
 */
 
 
-class Board {
+class BoardGeometry {
 public:
 	// offset from
-	Board(uint16_t x, uint16_t y)
+	BoardGeometry(uint16_t x, uint16_t y)
 		: offset(x,y)
 	{}
 
@@ -466,7 +469,7 @@ private:
 	StepMotor & m1;
 	OutPin & motEn;
 	Servo & srv;
-	Board b;
+	BoardGeometry b;
 	AngleSolver solver;
 	Angles currentAng;
 	const uint8_t lengths[2] = {245, 176};
@@ -549,7 +552,7 @@ class Eyes {
 			// "Режим без декодирования"
 			SendDataSPI2(0x0900); 
 			*/
-			spi_send16(0x0A, 0x02);
+			spi_send16(0x0A, 0x01);
 			spi_send16(0x0B, 0x07);
 			spi_send16(0x0C, 0x01);
 			spi_send16(0x0F, 0x00);
@@ -566,18 +569,39 @@ class Eyes {
 		void test(uint8_t data) {
 			for(int i = 1; i < 9; i++)
 			{
-				spi_send16_sym(i, eyes_set[3][8-i]);
+				spi_send16_sym(i, eyes_set[data%6][8-i]);
 			}
 		}
 private:
-		uint8_t eyes_set[4][8] =
-		{{
+		uint8_t eyes_set[6][8] =
+		{
+		{ // normal
 			0b11111111,
 			0b00000000,
-			0b00001100,
-			0b00011110,
-			0b00011110,
-			0b00001100,
+			0b00011000,
+			0b00111100,
+			0b00111100,
+			0b00011000,
+			0b00000000,
+			0b00000000,
+		},
+		{ // down
+			0b00000000,
+			0b00000000,
+			0b00000000,
+			0b00000000,
+			0b00011000,
+			0b00111100,
+			0b00111100,
+			0b00011000,
+		},
+		{ // up
+			0b00011000,
+			0b00111100,
+			0b00111100,
+			0b00011000,
+			0b00000000,
+			0b00000000,
 			0b00000000,
 			0b00000000,
 		},
@@ -585,16 +609,16 @@ private:
 			0b11111111,
 			0b00000000,
 			0b00111100,
-			0b00100100,
-			0b00100100,
+			0b01000010,
+			0b01000010,
+			0b01000010,
 			0b00111100,
-			0b00000000,
 			0b00000000,
 		},
 		{ // ярость
 			0b11100000,
-			0b00011100,
-			0b00000011,
+			0b00111100,
+			0b00000111,
 			0b00000000,
 			0b00001110,
 			0b00001110,
@@ -605,15 +629,156 @@ private:
 			0b00000000,
 			0b00000000,
 			0b11111111,
-			0b00100100,
-			0b00100100,
+			0b00111100,
 			0b11111111,
+			0b00000000,
 			0b00000000,
 			0b00000000,
 		}
 		};
 };
 
+class VoiceModule {
+	
+	public:
+		VoiceModule(OutPin & txPin, InPin & busyPin)
+		: tx(txPin)
+		, busy(busyPin)
+		{}
+		void play(uint8_t fold, uint8_t track)
+		{
+			wait();
+			//7E FF 06 0F 00 01 02 EF 
+			//Specify track "002" in the folder “01”
+			cmd[3] = 0x0F;
+			cmd[5] = fold;
+			cmd[6] = track;
+			sendData(cmd, 8);
+			_delay_ms(100);
+		}
+/*
+		void sleep()
+		{
+			wait();
+			cmd[3] = 0x0A;
+			cmd[4] = 0;
+			cmd[5] = 0;
+			cmd[6] = 0;
+			sendData(cmd, 8);
+			_delay_ms(100);
+
+		}
+*/		
+		void wait() {
+			while(!busy) {
+				_delay_ms(200);
+			}
+		}
+
+	private:
+		uint8_t cmd[8] = {0x7E, 0xFF, 0x06, 0x00, 0x00, 0x00, 0x00, 0xEF};
+
+		void sendData(uint8_t * cmd, uint8_t len)
+		{
+			for(int i = 0; i < len; ++i) {
+				sendChar(cmd[i]);
+			}
+		}
+		
+		void sendChar(uint8_t c)
+		{
+			c = ~c;
+			tx.clear();
+			for (uint8_t i = 10; i; i--)
+			{
+				_delay_us( 1e6 / 9600 );         // bit duration
+				if( c & 1 )
+					tx.clear();
+				else
+					tx.set();
+				c >>= 1;
+			}
+		}
+	private:
+		OutPin & tx;
+		InPin & busy;
+};
+
+class EmoCore 
+{
+	public:
+		enum Event {
+			WakeUp,
+			Wating,
+			OppMoves,
+			IMove,
+			LostPieces,
+			WinPieces,
+			LostGame,
+			WinGame,
+		};
+
+		EmoCore(VoiceModule & voiceModule, Eyes & eyesModule)
+		: voiceM(voiceModule)
+		, eyesM(eyesModule)
+		{
+		}
+	
+		void processEvent(Event e)
+		{
+			uint8_t ind = rand();	
+			switch(e) {
+				case WakeUp: // say hello, say rules, ask arrange pieces
+					voiceM.play(1, hello[ind % sizeof(hello)]);
+					voiceM.play(1, hello[ind % sizeof(hello)]);
+					voiceM.wait();
+					_delay_ms(1000);
+					voiceM.play(1,rules[0]);// always say rules
+					break;
+				case Wating: // say smth, joke?
+					if(rand()%2) {
+						voiceM.play(1, waiting[ind % sizeof(waiting)]);
+					} else {
+						voiceM.play(1, jokes[ind % sizeof(jokes)]);
+					}
+					break;
+				case OppMoves:
+					voiceM.play(1, oppMoves[ind % sizeof(oppMoves)]);
+					break;
+				case IMove:
+					voiceM.play(1, myMove[ind % sizeof(myMove)]);
+					break;
+				case LostPieces:
+					voiceM.play(1, lostPieces[ind % sizeof(lostPieces)]);
+					break;
+				case WinPieces: 
+					voiceM.play(1, winPieces[ind % sizeof(winPieces)]);
+					break;
+				case LostGame:
+					voiceM.play(1, lostGame[ind % sizeof(lostGame)]);
+					break;
+				case WinGame:
+					voiceM.play(1, winGame[ind % sizeof(winGame)]);
+					break;
+				default:
+					break;
+			}
+		}
+	private:
+		const uint8_t hello[11] = {1,3,4,5,6,7,8,9,119,120,121};
+		const uint8_t rules[1] = {10};
+		const uint8_t myMove[3] = {20,21,24};
+		const uint8_t oppMoves[10] = {50,51,61,62,63,64,65,68,69,70};
+		const uint8_t lostPieces[28] = {40,41,42,43,44,45,46,47,48,49,50,51,52,53,60,61,62,63,64,65,66,67,68,69,70,71,72,73};
+		const uint8_t winPieces[16] = {74,75,76,80,20,21,22,23,24,25,26,27,28,29,30,122};
+		const uint8_t winGame[12] = {80,81,82,83,84,85,86,87,90,91,92,94};
+		const uint8_t lostGame[10] = {91,92,93,94,95,100,101,102,103,104};
+		const uint8_t waiting[7] = {110,111,112,113,114,115,119};
+		const uint8_t jokes[3] = {116,117,118};
+
+		VoiceModule & voiceM;
+		Eyes & eyesM;
+};
 
 // Objects
 OutPin led(&DDRB, &PORTB, PIN5);     // on board led
@@ -625,6 +790,9 @@ InPin zero1pin(&DDRD, &PORTD, &PIND, PIN4); // zero switch pin (low: pressed)
 OutPin magnito(&DDRC, &PORTC, PIN0); // electro magnet (low: on, hight: off)
 OutPin servoPin(&DDRD, &PORTD, PIN3);   // arm servoPin (OC2B)
 OutPin boardLoad(&DDRC, &PORTC, PIN1);
+// voice module
+InPin voiceBusy (&DDRC, &PORTC, &PINC, 5);
+OutPin voiceTx (&DDRC, &PORTC, 2);
 
 volatile uint8_t t0value;
 StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
@@ -633,6 +801,8 @@ StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
 Servo servo(magnito);
 MecanicalArm arm(m0, m1, motEn, servo);
 Eyes eyes;
+VoiceModule voice(voiceTx, voiceBusy);
+EmoCore emoCore(voice, eyes);
 /*
 ISR(INT0_vect)
 {
@@ -681,6 +851,7 @@ ISR(TIMER1_OVF_vect)
 
 int main(void)
 {
+
 	// setup external interrupt for endstops
 	//EICRA = (1 << ISC01) | (1 << ISC11);
 	//EIMSK = (1 << INT0) | (1 << INT1);
@@ -711,14 +882,20 @@ int main(void)
 	uart_init(0);
 	msg << m::endl << m::tab << "~ CheckersBot v1.0 ~" << m::endl;
 
+	// use eeprom for seed
+	uint16_t val = eeprom_read_word(0);
+	srand(val);
+	eeprom_write_word(0, rand());
+
 	sei();
 
 	eyes.init();
 	eyes.clear();
 	_delay_ms(1000);
-	//arm.init();
-	/*
-	while(0) {
+	emoCore.processEvent(EmoCore::Event::WakeUp);
+	arm.init();
+	
+	while(1) {
 		arm.move(0,63);
 		_delay_ms(500);
 		arm.move(63,0);
@@ -726,7 +903,7 @@ int main(void)
 		arm.move(0,63);
 		_delay_ms(500);
 	}
-	*/
+	
 	
 	/* solver test
 	AngleSolver solver;
@@ -740,19 +917,12 @@ int main(void)
 	solver.solve(-60,  110);
 	solver.solve(-170, 110);
 	*/
-	uint8_t i = 0;
-	while(1)
-	{
-		i = (i+1)%8;
-		eyes.test(1<<i);
-		_delay_ms(300);
-		
-	}
 
 	while(1)
 	{
 		led.toggle();
 		_delay_ms(1000);
+		eyes.test(rand());
 
 		boardLoad.set();
 		uint8_t d[4] = {0};
