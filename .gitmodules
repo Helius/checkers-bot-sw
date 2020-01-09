@@ -1,0 +1,3 @@
+[submodule "checkers-simple-algorithm"]
+	path = checkers-simple-algorithm
+	url = https://github.com/Helius/checkers-simple-algorithm
