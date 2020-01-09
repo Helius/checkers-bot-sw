@@ -12,7 +12,7 @@
 add_avr_executable(
    checkers
    main.cpp
-   checkers.h
+   ../checkers-simple-algorithm/checkers.h
 )
 
 find_library(C_LIB c)

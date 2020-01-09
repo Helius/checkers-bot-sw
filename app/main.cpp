@@ -11,11 +11,14 @@
 
 #include <uart.h>
 #include <misc.h>
+#include <string.h>
 
-#include <checkers.h>
+//TODO: fixit
+#include <../checkers-simple-algorithm/checkers.h>
 
 // Types
-//
+
+
 class Angles {
 public:
 	Angles() = default;
@@ -803,6 +806,9 @@ MecanicalArm arm(m0, m1, motEn, servo);
 Eyes eyes;
 VoiceModule voice(voiceTx, voiceBusy);
 EmoCore emoCore(voice, eyes);
+Board b;
+CheckersAI ai;
+
 /*
 ISR(INT0_vect)
 {
@@ -894,6 +900,8 @@ int main(void)
 	_delay_ms(1000);
 	emoCore.processEvent(EmoCore::Event::WakeUp);
 	arm.init();
+
+	ai.findLongestTake(b, true, 0);
 	
 	while(1) {
 		arm.move(0,63);
