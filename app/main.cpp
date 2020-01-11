@@ -801,6 +801,9 @@ class HumanMoveDetector
 			s <<= 8;
 			s |= d[2];
 			s <<= 8;
+			// hack because i soldered 0xF000 pin wrong
+			uint8_t tmp = swap(d[1]);
+			d[1] = ((tmp << 4) & 0xF0) + (d[1] & 0x0F);
 			s |= d[1];
 			s <<= 8;
 			s |= d[0];
@@ -850,7 +853,7 @@ class HumanMoveDetector
 				if(diff & 1)
 				{
 					if(cnt == ind) {
-						return BoardEvent(i*2, (state & diff & 1) ? BoardEvent::Up : BoardEvent::Down);
+						return BoardEvent((i/4)%2 ? i*2+1 : i*2, (state & diff & 1) ? BoardEvent::Up : BoardEvent::Down);
 					}
 					cnt++;
 				}
@@ -859,47 +862,18 @@ class HumanMoveDetector
 			}
 			return BoardEvent();
 		}
-/*
-		BoardEvent checkBoard()
-		{
-
-			if(!init)
-			{
-				init = true;
-				prev = state;
-				return BoardEvent();
-			}
-
-			if(uint32_t diff = state ^ prev) {
-				prev = state;
-				
-				msg << "board changed ";
-				printHex32(diff);
-				printHex32(diff&state);
-				msg << m::endl;
-
-				if((diff != 0) && (diff & (diff-1)))
-				{
-					msg << "i see multiple changes!" << m::endl;
-					return BoardEvent(0, BoardEvent::Multy);
-				}
-
-				BoardEvent::Event e = (diff & state) ? BoardEvent::Down : BoardEvent::Up; 
-				for(int i = 0; i < 32; ++i) {
-					if(diff & 1)
-					{
-						return BoardEvent(i<<1, e);
-					}
-					diff >>= 1;
-				}
-			}
-
-			return BoardEvent();// ?
-		}
-*/
 
 		bool isBoardInit()
 		{
+			uint32_t state = getState();
+			for(int i = 0; i < 8; ++i) {
+				for(int j = 0; j < 4; ++j) {
+					msg << (state & 1);
+					state >>= 1;
+				}
+				msg << m::tab;
+			}
+			msg << m::endl;
 			return getState() == 0x000ff000;
 		}
 	
@@ -1123,15 +1097,16 @@ int main(void)
 
 			case Game::MyMove:
 				{
-				// say smth
-				Move2 move = game.getMyMove();
-				if(move) {
-					arm.move(0,63);
-					game.myMoveApplyed();
-				} else {
-					// i give up (no move were found)
-					game.giveUp();
-				}
+					// say smth
+					msg << "find my move" << m::endl;
+					Move2 move = game.getMyMove();
+					if(move) {
+						arm.move(0,63);
+						game.myMoveApplyed();
+					} else {
+						// i give up (no move were found)
+						game.giveUp();
+					}
 				}
 				break;
 
