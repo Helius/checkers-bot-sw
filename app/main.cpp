@@ -482,15 +482,6 @@ private:
 	static constexpr uint8_t m1HomeAngle = 5;
 };
 
-uint8_t spi_read()
-{
-   SPDR = 0;
-   /* Wait for reception complete */
-   while (!(SPSR & (1<<SPIF)));
-   /* Return data register */
-   return SPDR;
-}
-
 OutPin eyesLoad(&DDRC, &PORTC, PIN4);
 
 void spi_send16(uint8_t addr, uint8_t data)
@@ -783,6 +774,152 @@ class EmoCore
 		Eyes & eyesM;
 };
 
+class HumanMoveDetector 
+{
+	public:
+		HumanMoveDetector(OutPin & loadPin)
+			: load(loadPin)
+		{}
+
+		uint32_t getState() {
+			uint32_t s;
+			load.set();
+			uint8_t d[4];
+			for(int i = 0; i < 4; ++i) {
+				d[i] = spi_read();
+			}
+			load.clear();
+/*
+			msg << "spi: ";
+			printHex(d[0]);	
+			printHex(d[1]);	
+			printHex(d[2]);	
+			printHex(d[3]);	
+			msg << m::endl;
+*/
+			s = d[3];
+			s <<= 8;
+			s |= d[2];
+			s <<= 8;
+			s |= d[1];
+			s <<= 8;
+			s |= d[0];
+
+			msg << "board getState: ";
+			printHex32(s);
+			msg << m::endl;
+			return s;
+		}
+
+		void saveBoard() {
+			prev = getState();
+		}
+
+		bool waitForMoveStarted() {
+			return getState() != prev;
+		}
+
+		uint8_t getChangesCount()
+		{
+			uint32_t state = getState();
+			uint32_t diff = state ^ prev;
+			uint8_t cnt = 0;
+			
+			msg << "board changed ";
+			printHex32(state);
+			printHex32(prev);
+			printHex32(diff);
+			printHex32(diff&state);
+			msg << m::endl;
+			
+			for(int i = 0; i < 32; ++i) {
+				if(diff & 1)
+				{
+					cnt++;
+				}
+				diff >>= 1;
+			}
+			return cnt;
+		}
+
+		BoardEvent getEvent(uint8_t ind) {
+			uint32_t state = getState();
+			uint32_t diff = state ^ prev;
+			uint8_t cnt = 0;
+			for(uint8_t i = 0; i < 32; ++i) {
+				if(diff & 1)
+				{
+					if(cnt == ind) {
+						return BoardEvent(i*2, (state & diff & 1) ? BoardEvent::Up : BoardEvent::Down);
+					}
+					cnt++;
+				}
+				diff >>= 1;
+				state >>= 1;
+			}
+			return BoardEvent();
+		}
+/*
+		BoardEvent checkBoard()
+		{
+
+			if(!init)
+			{
+				init = true;
+				prev = state;
+				return BoardEvent();
+			}
+
+			if(uint32_t diff = state ^ prev) {
+				prev = state;
+				
+				msg << "board changed ";
+				printHex32(diff);
+				printHex32(diff&state);
+				msg << m::endl;
+
+				if((diff != 0) && (diff & (diff-1)))
+				{
+					msg << "i see multiple changes!" << m::endl;
+					return BoardEvent(0, BoardEvent::Multy);
+				}
+
+				BoardEvent::Event e = (diff & state) ? BoardEvent::Down : BoardEvent::Up; 
+				for(int i = 0; i < 32; ++i) {
+					if(diff & 1)
+					{
+						return BoardEvent(i<<1, e);
+					}
+					diff >>= 1;
+				}
+			}
+
+			return BoardEvent();// ?
+		}
+*/
+
+		bool isBoardInit()
+		{
+			return getState() == 0x000ff000;
+		}
+	
+	private:
+
+		uint8_t spi_read()
+		{
+			SPDR = 0;
+			/* Wait for reception complete */
+			while (!(SPSR & (1<<SPIF)));
+			/* Return data register */
+			return SPDR;
+		}
+
+	private:
+		OutPin & load;
+		bool init = false;
+		uint32_t prev;
+};
+
 // Objects
 OutPin led(&DDRB, &PORTB, PIN5);     // on board led
 OutPin m0dir(&DDRD, &PORTD, PIN7);   // PD7 is direction for motor 2
@@ -806,8 +943,8 @@ MecanicalArm arm(m0, m1, motEn, servo);
 Eyes eyes;
 VoiceModule voice(voiceTx, voiceBusy);
 EmoCore emoCore(voice, eyes);
-Board b;
-CheckersAI ai;
+HumanMoveDetector moveDetector(boardLoad);
+Game game;
 
 /*
 ISR(INT0_vect)
@@ -898,21 +1035,9 @@ int main(void)
 	eyes.init();
 	eyes.clear();
 	_delay_ms(1000);
-	emoCore.processEvent(EmoCore::Event::WakeUp);
-	arm.init();
+	//emoCore.processEvent(EmoCore::Event::WakeUp);
+	//arm.init();
 
-	ai.findLongestTake(b, true, 0);
-	
-	while(1) {
-		arm.move(0,63);
-		_delay_ms(500);
-		arm.move(63,0);
-		_delay_ms(500);
-		arm.move(0,63);
-		_delay_ms(500);
-	}
-	
-	
 	/* solver test
 	AngleSolver solver;
 	solver.solve(95,   105);
@@ -925,25 +1050,109 @@ int main(void)
 	solver.solve(-60,  110);
 	solver.solve(-170, 110);
 	*/
+	uint8_t cnt = 0;
 
 	while(1)
 	{
-		led.toggle();
-		_delay_ms(1000);
-		eyes.test(rand());
+		_delay_ms(100);
+		
+		cnt++;
 
-		boardLoad.set();
-		uint8_t d[4] = {0};
-		for(int i = 0; i < 4; ++i) {
-			d[i] = spi_read();
+		msg << "game state is " << game.getState() << m::endl;
+
+		switch(game.getState())
+		{
+			case Game::WaitForBoardInit:
+				if(moveDetector.isBoardInit()) {
+					moveDetector.saveBoard();
+					// ask make first move
+					game.startGame();
+				} else {
+					// joke, ask to init the board
+				}
+				break;
+
+			case Game::WaitTheirFirstMove:
+				{
+					static uint8_t waitCnt = 0;
+					static bool moveInProgress = false;
+
+					if(!moveInProgress && moveDetector.waitForMoveStarted()) {
+						msg << "detect move started" << m::endl;
+						// human start moving
+						moveInProgress = true;
+					} else if(moveInProgress) {
+						waitCnt++;
+						if(waitCnt > 50) {
+							waitCnt = 0;
+							moveInProgress = false;
+							// decide move is finished
+							
+							uint8_t chCnt = moveDetector.getChangesCount();
+							
+							msg << "Decide move is finished, changes cnt: " << chCnt << m::endl;
+
+							for(int i = 0; i < chCnt; ++i) {
+								BoardEvent e = moveDetector.getEvent(i);
+								msg << "Apply event: " << e.ind << ", " << e.event << m::endl;
+								game.applyBoardEvent(e);
+							}
+							moveDetector.saveBoard();
+							game.moveFinished();
+						} else {
+							msg << "wait move finished" << m::endl;
+						}
+					} else {
+						msg << "just wait first move" << m::endl;
+						//joke, ask to make a move
+					}
+				}
+				break;
+
+			case Game::TheirMove:
+				// wait for 10 sec, than ask to make a move, repeat
+				/*if(BoardEvent e = moveDetector.checkBoard())
+				{
+					msg << "Detect event - ind: " << e.ind << ", e: " << e.event;
+				
+					game.applyBoardEvent(e);
+					// react some how
+					eyes.test(rand());
+				}*/
+				break;
+
+			case Game::MyMove:
+				{
+				// say smth
+				Move2 move = game.getMyMove();
+				if(move) {
+					arm.move(0,63);
+					game.myMoveApplyed();
+				} else {
+					// i give up (no move were found)
+					game.giveUp();
+				}
+				}
+				break;
+
+			case Game::IWin:
+				// say thankyou and reset game
+				game.reset();
+				break;
+
+			case Game::TheyWin:
+				// say thankyou and reset game
+				game.reset();
+				break;
 		}
-		boardLoad.clear();
-		msg << "spi: ";
-		printHex(d[0]);	
-		printHex(d[1]);	
-		printHex(d[2]);	
-		printHex(d[3]);	
-		msg << m::endl;
+
+		// about 1 sec calls
+
+		if(cnt > 20) {
+			cnt = 0;
+
+			led.toggle();
+		}
 	}
 }
 

@@ -31,31 +31,22 @@ void printHex(uint8_t value)
 	uart_putchar(htoa(l));
 	uart_putchar(' ');
 }
-/*
-void printNumb(int16_t numb)
+
+void printHex32(uint32_t numb)
 {
-	char buf[6] = {0};
-	int i = 0;
-	itoa(numb, buf, 10);
-	while(buf[i] != 0) {
-		uart_putchar(buf[i]);
-		i++;
+	for(int i = 0; i < 4; ++i)
+	{
+		uint8_t h = (numb & 0xF0000000)>>24;
+		h >>= 4;
+		uint8_t l = (numb & 0x0F000000)>>24;
+		uart_putchar(htoa(h));
+		uart_putchar(htoa(l));
+		numb <<= 8;
 	}
+
 	uart_putchar(' ');
 }
 
-void msg(int16_t numb)
-{
-	printNumb(numb);
-}
-
-void msg(const char * str)
-{
-	while(*(str)) {
-		uart_putchar(*(str++));
-	}
-}
-*/
 // 0
 // some var
 // _end
