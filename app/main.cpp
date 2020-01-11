@@ -13,9 +13,6 @@
 #include <misc.h>
 #include <string.h>
 
-//TODO: fixit
-#include <../checkers-simple-algorithm/checkers.h>
-
 // Types
 
 
@@ -33,6 +30,10 @@ public:
 
 Message msg;
 using m = Message;
+
+//TODO: fixit
+#include <../checkers-simple-algorithm/checkers.h>
+
 
 class StepMotor {
 	public:
@@ -483,7 +484,7 @@ private:
 };
 
 OutPin eyesLoad(&DDRC, &PORTC, PIN4);
-
+/*
 void spi_send16(uint8_t addr, uint8_t data)
 {
 	_delay_ms(1);
@@ -501,7 +502,7 @@ void spi_send16(uint8_t addr, uint8_t data)
 	while (!(SPSR & (1<<SPIF)));
 	eyesLoad.set();
 	_delay_ms(1);
-}
+}*/
 
 uint8_t swap(uint8_t b)
 {
@@ -511,7 +512,7 @@ uint8_t swap(uint8_t b)
    return b;
 }
 
-void spi_send16_sym(uint8_t addr, uint8_t data)
+void spi_send16(uint8_t addr, uint8_t data, bool sym = false)
 {
 	_delay_ms(1);
 	eyesLoad.clear();
@@ -523,8 +524,9 @@ void spi_send16_sym(uint8_t addr, uint8_t data)
 
 	SPDR = addr;
 	while (!(SPSR & (1<<SPIF)));
-
-	SPDR = swap(data);
+	
+	SPDR = sym ? swap(data) : data;
+	
 	while (!(SPSR & (1<<SPIF)));
 	eyesLoad.set();
 	_delay_ms(1);
@@ -560,42 +562,76 @@ class Eyes {
 				spi_send16(i, 0);
 			}
 		}
-		void test(uint8_t data) {
-			for(int i = 1; i < 9; i++)
-			{
-				spi_send16_sym(i, eyes_set[data%6][8-i]);
+
+		enum Yeys {
+			Normal = 0,
+			Curios = 1,
+			Anger = 2,
+			Thin = 3,
+			Up,
+			Down,
+			Right,
+			Left,
+		};
+
+		void show(uint8_t set) {
+			switch(set) {
+				case Normal:
+				case Curios:
+				case Anger:
+				case Thin:
+					for(int i = 1; i < 9; i++)
+					{
+						spi_send16(i, eyes_set[set][8-i], true);
+					}
+					break;
+				case Up:
+					for(int i = 1; i < 5; i++)
+					{
+						spi_send16(i, 0x00);
+					}
+					for(int i = 5; i < 9; i++)
+					{
+						spi_send16(i, eyes_set[Normal][10-i], true);
+					}
+					break;
+				case Down:
+					for(int i = 1; i < 5; i++)
+					{
+						spi_send16(i, eyes_set[Normal][6-i], true);
+					}
+					for(int i = 5; i < 9; i++)
+					{
+						spi_send16(i, 0x00);
+					}
+					break;
+				case Right:
+					for(int i = 1; i < 9; i++)
+					{
+						spi_send16(i, eyes_set[Normal][8-i]>>2);
+					}
+					break;
+				case Left:
+					for(int i = 1; i < 9; i++)
+					{
+						spi_send16(i, eyes_set[Normal][8-i]<<2);
+					}
+					break;
+				default:
+					break;
 			}
 		}
+
 private:
-		uint8_t eyes_set[6][8] =
+		uint8_t eyes_set[4][8] =
 		{
 		{ // normal
-			0b11111111,
-			0b00000000,
-			0b00011000,
-			0b00111100,
-			0b00111100,
-			0b00011000,
-			0b00000000,
-			0b00000000,
-		},
-		{ // down
-			0b00000000,
-			0b00000000,
 			0b00000000,
 			0b00000000,
 			0b00011000,
 			0b00111100,
 			0b00111100,
 			0b00011000,
-		},
-		{ // up
-			0b00011000,
-			0b00111100,
-			0b00111100,
-			0b00011000,
-			0b00000000,
-			0b00000000,
 			0b00000000,
 			0b00000000,
 		},
@@ -623,13 +659,14 @@ private:
 			0b00000000,
 			0b00000000,
 			0b11111111,
-			0b00111100,
 			0b11111111,
+			0b00000000,
 			0b00000000,
 			0b00000000,
 			0b00000000,
 		}
 		};
+		
 };
 
 class VoiceModule {
@@ -720,6 +757,7 @@ class EmoCore
 	
 		void processEvent(Event e)
 		{
+			
 			uint8_t ind = rand();	
 			switch(e) {
 				case WakeUp: // say hello, say rules, ask arrange pieces
@@ -757,8 +795,10 @@ class EmoCore
 				default:
 					break;
 			}
+			
 		}
 	private:
+		
 		const uint8_t hello[11] = {1,3,4,5,6,7,8,9,119,120,121};
 		const uint8_t rules[1] = {10};
 		const uint8_t myMove[3] = {20,21,24};
@@ -865,6 +905,7 @@ class HumanMoveDetector
 
 		bool isBoardInit()
 		{
+			/*
 			uint32_t state = getState();
 			for(int i = 0; i < 8; ++i) {
 				for(int j = 0; j < 4; ++j) {
@@ -874,6 +915,7 @@ class HumanMoveDetector
 				msg << m::tab;
 			}
 			msg << m::endl;
+			*/
 			return getState() == 0x000ff000;
 		}
 	
@@ -1030,8 +1072,6 @@ int main(void)
 	{
 		_delay_ms(100);
 		
-		cnt++;
-
 		msg << "game state is " << game.getState() << m::endl;
 
 		switch(game.getState())
@@ -1091,14 +1131,14 @@ int main(void)
 				
 					game.applyBoardEvent(e);
 					// react some how
-					eyes.test(rand());
+					eyes.show(rand());
 				}*/
 				break;
 
 			case Game::MyMove:
 				{
 					// say smth
-					msg << "find my move" << m::endl;
+					msg << "find my move with ram: " << ramUsage() << m::endl;
 					Move2 move = game.getMyMove();
 					if(move) {
 						arm.move(0,63);
@@ -1122,11 +1162,12 @@ int main(void)
 		}
 
 		// about 1 sec calls
-
+		cnt++;
 		if(cnt > 20) {
 			cnt = 0;
+			eyes.show(Eyes::Up);
 
-			led.toggle();
+			//led.toggle();
 		}
 	}
 }
