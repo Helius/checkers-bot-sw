@@ -13,6 +13,19 @@
 #include <misc.h>
 #include <string.h>
 
+
+/* TODO
+ - add detecting piece became a king
+ - detect win/loose event (white and black)
+ - add timer for eyes and connect it with game events
+ - cteate dropping pieces outside board on take
+ - create a video, send it to robotex whatsapp
+ - 
+ 
+ --- feature cut ------
+ - moves randomising
+ * */
+
 // Types
 
 
@@ -37,12 +50,13 @@ using m = Message;
 
 class StepMotor {
 	public:
-		StepMotor(OutPin & dirPin, InPin & zeroPin, uint8_t clockSrc, volatile uint8_t * reg, volatile uint8_t * control)
+		StepMotor(OutPin & dirPin, InPin & zeroPin, uint8_t clockSrc, volatile uint8_t * reg, volatile uint8_t * control, uint8_t defaultSpeed)
 		: dir(dirPin)
 		, zero(zeroPin)
 		, clockSource(clockSrc)
 		, value(reg)
 		, tcr(control)
+		, maxSpeed(defaultSpeed)
 		{}
 
 		bool busy() {
@@ -55,7 +69,10 @@ class StepMotor {
 			}
 		}
 
-		void moveAngle(int16_t dAngle, uint8_t speed = MaxSpeed) {
+		void moveAngle(int16_t dAngle, uint8_t speed = 0) {
+			if(speed == 0) {
+				speed = maxSpeed;
+			}
 			bool direction = dAngle > 0 ? 0 : 1;
 			msg << "moveAngle " << dAngle/10 << direction << "steps " << stepsPerDAngle(abs(dAngle)) << m::endl;
 			if(!busy() && dAngle) {
@@ -143,7 +160,7 @@ class StepMotor {
 		volatile uint8_t * tcr;
 		static constexpr uint8_t speedMin = 2; // x100 pulse per second
 		uint8_t speedMax = 12;
-		static constexpr uint8_t MaxSpeed = 40;
+		uint8_t maxSpeed = 40;
 		static constexpr uint8_t acc_div = 30;
 };
 
@@ -270,12 +287,17 @@ public:
 
 	Point indToPoint(uint8_t ind)
 	{
-		uint8_t row = ind % 8;
-		uint8_t col = ind / 8;
+		if(ind < 100) { // ind on board
+			uint8_t row = ind % 8;
+			uint8_t col = ind / 8;
 
-		return Point(
-			row*cellSize + cellSize/2 + margin + offset.x,
-			size + offset.y - (col*cellSize + cellSize/2 + margin));
+			return Point(
+					row*cellSize + cellSize/2 + margin + offset.x,
+					size + offset.y - (col*cellSize + cellSize/2 + margin));
+		} else { // ind outside board
+			uint8_t tInd = (ind - 100)%12;
+			return Point(offset.x-(tInd%4)*cellSize+cellSize/2, offset.y+85+(tInd/4)*cellSize);
+		}
 	}
 
 private:
@@ -325,7 +347,7 @@ class AngleSolver
 			return angs;
 		}
 		static constexpr uint16_t r0 = 245; 
-		static constexpr uint16_t r1 = 176; 
+		static constexpr uint16_t r1 = 167; 
 		static constexpr uint16_t r02 = r0*r0;
 		static constexpr uint16_t r12 = r1*r1;
 };
@@ -343,6 +365,7 @@ public:
 	}
 
 	void init() {
+		takeInd = 100;
 		srv.init();
 		motEn.clear();
 		autoHomeImp();
@@ -352,6 +375,18 @@ public:
 	void test() {
 
 		motEn.clear();
+		//moveToInd(63);
+		//srv.putSync();
+		//moveToAng(900,0);
+		move(13,48);
+		//move(57,0);
+		//move(57,6);
+		//move(57,54);
+		//move(57,48);
+		//move(47,57);
+		//move(47,59);
+		//move(47,61);
+		//move(47,63);
 
 		//moveToPoint(-176,245);
 /*		
@@ -368,24 +403,31 @@ public:
 			srv.putSync();
 		}
 */
-/*		
-		moveToInd(0);
+		/*
+		moveToInd(63-9);
 		srv.putSync();
+		
 		moveToInd(7);
 		srv.putSync();
-		moveToInd(56);
+		moveToInd(57);
 		srv.putSync();
 		moveToInd(63);
 		srv.putSync();
-		moveToInd(56);
+		moveToInd(57);
 		srv.putSync();
 		moveToInd(8);
 		srv.putSync();
 		moveToInd(63);
 		srv.putSync();
-		moveToInd(56);
+		moveToInd(57);
 		srv.putSync();
 */
+		motEn.set();
+	}
+
+	void home() {
+		motEn.clear();
+		autoHomeImp();
 		motEn.set();
 	}
 
@@ -394,23 +436,21 @@ public:
 		motEn.clear();
 		moveToInd(ind);
 		srv.grabSync();
-		//autoHomeImp();
-		// TODO: have to move outside board and drop peice
-		moveToInd(63);
-		//srv.put();
+		moveToInd(takeInd++);
+		srv.put();
 		motEn.set();
 	}
 
 	// move peice from feild to new field
 	void move(uint8_t fromInd, uint8_t toInd)
 	{
+		msg << "=== arm: move from " << fromInd << " to " << toInd;
 		motEn.clear();
 		moveToInd(fromInd);
 		srv.grabSync();
 		moveToInd(toInd);
 		srv.putSync();
 		_delay_ms(300);
-		//autoHomeImp();
 		motEn.set();
 	}
 
@@ -425,7 +465,7 @@ private:
 
 	void moveToInd(uint8_t ind)
 	{
-		msg << "== move to ind " << ind << m::endl;
+		msg << "= move to ind " << ind << m::endl;
 		Angles a = calcAngles(ind);
 		moveToAng(a.ang0, a.ang1);
 	}
@@ -461,11 +501,11 @@ private:
 		m1.moveAngle(-1000, 10);
 		m1.wait();
 		msg << "arm: m1 ready" << m::tab;
-		m0.moveAngle(m0HomeAngle);
-		m1.moveAngle(m1HomeAngle);
+		m0.moveAngle(initAngle);
+		m1.moveAngle(initAngle);
 		m0.wait();
 		m1.wait();
-		currentAng = Angles(2*m0HomeAngle, 2*m1HomeAngle);
+		currentAng = Angles(initAngle + m0HomeAngle, initAngle + m1HomeAngle);
 		msg << "arm: done" << m::endl;
 	}
 private:
@@ -476,11 +516,14 @@ private:
 	BoardGeometry b;
 	AngleSolver solver;
 	Angles currentAng;
-	const uint8_t lengths[2] = {245, 176};
+	//const uint8_t lengths[2] = {245, 176};
+	const uint8_t lengths[2] = {245, 167};
 	static constexpr int8_t boardOffsetY = 65;
-	static constexpr int16_t boardOffsetX = -160;
-	static constexpr uint8_t m0HomeAngle = 56;
-	static constexpr uint8_t m1HomeAngle = 5;
+	static constexpr int16_t boardOffsetX = -145;//-160;
+	static constexpr int8_t m0HomeAngle = 35;
+	static constexpr int8_t m1HomeAngle = 30;
+	static constexpr int8_t initAngle = 50;
+	uint8_t takeInd = 100;
 };
 
 OutPin eyesLoad(&DDRC, &PORTC, PIN4);
@@ -761,9 +804,11 @@ class EmoCore
 			uint8_t ind = rand();	
 			switch(e) {
 				case WakeUp: // say hello, say rules, ask arrange pieces
+					eyesM.show(Eyes::Thin);
 					voiceM.play(1, hello[ind % sizeof(hello)]);
 					voiceM.play(1, hello[ind % sizeof(hello)]);
 					voiceM.wait();
+					eyesM.show(Eyes::Normal);
 					_delay_ms(1000);
 					voiceM.play(1,rules[0]);// always say rules
 					break;
@@ -951,8 +996,8 @@ InPin voiceBusy (&DDRC, &PORTC, &PINC, 5);
 OutPin voiceTx (&DDRC, &PORTC, 2);
 
 volatile uint8_t t0value;
-StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B);
-StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B);
+StepMotor m0(m0dir, zero0pin, 0u, &t0value, &TCCR0B, 45);
+StepMotor m1(m1dir, zero1pin, 2u, &ICR1L, &TCCR1B, 18);
 
 Servo servo(magnito);
 MecanicalArm arm(m0, m1, motEn, servo);
@@ -1052,7 +1097,7 @@ int main(void)
 	eyes.clear();
 	_delay_ms(1000);
 	//emoCore.processEvent(EmoCore::Event::WakeUp);
-	//arm.init();
+	arm.init();
 
 	/* solver test
 	AngleSolver solver;
@@ -1067,6 +1112,14 @@ int main(void)
 	solver.solve(-170, 110);
 	*/
 	uint8_t cnt = 0;
+
+
+	arm.test();
+
+	while(1) {
+		eyes.show(rand()%8);
+		_delay_ms(100);
+	}
 
 	while(1)
 	{
@@ -1085,6 +1138,18 @@ int main(void)
 					// joke, ask to init the board
 				}
 				break;
+
+			case Game::TheirMove:
+				// wait for 10 sec, than ask to make a move, repeat
+				/*if(BoardEvent e = moveDetector.checkBoard())
+				{
+					msg << "Detect event - ind: " << e.ind << ", e: " << e.event;
+				
+					game.applyBoardEvent(e);
+					// react some how
+					eyes.show(rand());
+				}*/
+	//			break;
 
 			case Game::WaitTheirFirstMove:
 				{
@@ -1123,29 +1188,25 @@ int main(void)
 				}
 				break;
 
-			case Game::TheirMove:
-				// wait for 10 sec, than ask to make a move, repeat
-				/*if(BoardEvent e = moveDetector.checkBoard())
-				{
-					msg << "Detect event - ind: " << e.ind << ", e: " << e.event;
-				
-					game.applyBoardEvent(e);
-					// react some how
-					eyes.show(rand());
-				}*/
-				break;
-
 			case Game::MyMove:
 				{
 					// say smth
 					msg << "find my move with ram: " << ramUsage() << m::endl;
 					Move2 move = game.getMyMove();
 					if(move) {
-						arm.move(0,63);
+						arm.move(63,54);
+						arm.home();
+						arm.move(63,54);
+						arm.home();
+						arm.move(63,54);
+						arm.home();
+						//arm.move(move.getFrom(),move.getStep(0).to);
+						//arm.home();
 						game.myMoveApplyed();
 					} else {
 						// i give up (no move were found)
 						game.giveUp();
+						arm.init();
 					}
 				}
 				break;
@@ -1153,11 +1214,13 @@ int main(void)
 			case Game::IWin:
 				// say thankyou and reset game
 				game.reset();
+				arm.init();
 				break;
 
 			case Game::TheyWin:
 				// say thankyou and reset game
 				game.reset();
+				arm.init();
 				break;
 		}
 
@@ -1165,7 +1228,7 @@ int main(void)
 		cnt++;
 		if(cnt > 20) {
 			cnt = 0;
-			eyes.show(Eyes::Up);
+			eyes.show(rand()%8);
 
 			//led.toggle();
 		}
