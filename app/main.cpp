@@ -296,7 +296,7 @@ public:
 					size + offset.y - (col*cellSize + cellSize/2 + margin));
 		} else { // ind outside board
 			uint8_t tInd = (ind - 100)%12;
-			return Point(offset.x-(tInd%4)*cellSize+cellSize/2, offset.y+85+(tInd/4)*cellSize);
+			return Point(offset.x-(tInd%4)*cellSize-cellSize, offset.y+85+(tInd/4)*cellSize);
 		}
 	}
 
@@ -379,6 +379,17 @@ public:
 		//srv.putSync();
 		//moveToAng(900,0);
 		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
+		take(13);
 		//move(57,0);
 		//move(57,6);
 		//move(57,54);
@@ -437,7 +448,7 @@ public:
 		moveToInd(ind);
 		srv.grabSync();
 		moveToInd(takeInd++);
-		srv.put();
+		srv.putSync();
 		motEn.set();
 	}
 
