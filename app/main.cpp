@@ -378,7 +378,7 @@ public:
 		//moveToInd(63);
 		//srv.putSync();
 		//moveToAng(900,0);
-		move(13,48);
+		take(13);
 		//move(57,0);
 		//move(57,6);
 		//move(57,54);
