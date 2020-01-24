@@ -74,12 +74,12 @@ class StepMotor {
 				speed = maxSpeed;
 			}
 			bool direction = dAngle > 0 ? 0 : 1;
-			msg << "moveAngle " << dAngle/10 << direction << "steps " << stepsPerDAngle(abs(dAngle)) << m::endl;
+			//msg << "moveAngle " << dAngle/10 << direction << "steps " << stepsPerDAngle(abs(dAngle)) << m::endl;
 			if(!busy() && dAngle) {
 				speedMax = speed;
 				moveSteps(stepsPerDAngle(abs(dAngle)), direction);
 			} else {
-				msg << "moveAngle: busy" << m::endl;
+				//msg << "moveAngle: busy" << m::endl;
 			}
 		}
 
@@ -92,7 +92,7 @@ class StepMotor {
 		void onStepHandler() {
 			uint8_t speed;
 			if(!zero && dir.get()) {
-				msg << "!zero" << m::endl;
+				//msg << "!zero" << m::endl;
 				stopTimer();
 				stepCount = 0;
 				endPoint = 0;
@@ -124,7 +124,7 @@ class StepMotor {
 
 		void moveSteps(uint32_t steps, bool direction) {
 			if(!zero && direction) {
-				msg << "moveSteps: !zero and direction" << m::endl;
+				//msg << "moveSteps: !zero and direction" << m::endl;
 				//return;
 			}
 			endPoint = steps;
@@ -296,7 +296,7 @@ public:
 					size + offset.y - (col*cellSize + cellSize/2 + margin));
 		} else { // ind outside board
 			uint8_t tInd = (ind - 100)%12;
-			return Point(offset.x-(tInd%4)*cellSize-cellSize, offset.y+85+(tInd/4)*cellSize);
+			return Point(offset.x-(tInd%3)*cellSize-cellSize, offset.y+85+(tInd/4)*cellSize);
 		}
 	}
 
@@ -315,13 +315,13 @@ class AngleSolver
 			Angles angs;
 			int64_t a = -2*x;
 			int64_t b = -2*y;
-			msg << "solver: check for: " << x << y << m::endl; 
+			//msg << "solver: check for: " << x << y << m::endl; 
 			int64_t c = x*x + y*y + r02 - r12;
 			int64_t a2b2 = x*x + y*y;
 			a2b2 <<= 2;
 			int64_t x0 = -(a*c)/a2b2;
 			int64_t y0 = -(b*c)/a2b2;
-			msg << "solver: x0, y0: " << x0 << y0 << m::endl;
+			//msg << "solver: x0, y0: " << x0 << y0 << m::endl;
 			int64_t d = r02 - (c*c)/a2b2;
 			//msg << "d: " << sqrt(d) << m::endl;
 			int64_t multa = sqrt((a*a*d)/a2b2);
@@ -331,19 +331,19 @@ class AngleSolver
 			int64_t rx = x0 + multb;
 			int64_t ry = 0;
 
-			msg << "solver: ram usage: " << ramUsage();
+			//msg << "solver: ram usage: " << ramUsage();
 
 			if(diff) {
 				ry = y0 + multa;
 			} else {
 				ry = y0 - multa;
 			}
-			msg << "solver: joint x,y is:" << rx << ry << m::endl; 
+			//msg << "solver: joint x,y is:" << rx << ry << m::endl; 
 
 			angs.ang0 = 573 * atan2(ry, rx);
 			angs.ang1 = 573 * atan2(y-ry, rx - x);
 
-			msg << "solver: angles:" << angs.ang0 << angs.ang1 << m::endl << m::endl;
+			//msg << "solver: angles:" << angs.ang0 << angs.ang1 << m::endl << m::endl;
 			return angs;
 		}
 		static constexpr uint16_t r0 = 245; 
@@ -379,17 +379,8 @@ public:
 		//srv.putSync();
 		//moveToAng(900,0);
 		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
-		take(13);
+		move(20,27);
+		makeKing(27);
 		//move(57,0);
 		//move(57,6);
 		//move(57,54);
@@ -451,11 +442,21 @@ public:
 		srv.putSync();
 		motEn.set();
 	}
+	
+	// grab taken piece and put it a top of ind
+	void makeKing(uint8_t ind) {
+		motEn.clear();
+		moveToInd(--takeInd);
+		srv.grabSync();
+		moveToInd(ind);
+		srv.putSync();
+		motEn.set();
+	}
 
 	// move peice from feild to new field
 	void move(uint8_t fromInd, uint8_t toInd)
 	{
-		msg << "=== arm: move from " << fromInd << " to " << toInd;
+		//msg << "=== arm: move from " << fromInd << " to " << toInd;
 		motEn.clear();
 		moveToInd(fromInd);
 		srv.grabSync();
@@ -476,7 +477,7 @@ private:
 
 	void moveToInd(uint8_t ind)
 	{
-		msg << "= move to ind " << ind << m::endl;
+		//msg << "= move to ind " << ind << m::endl;
 		Angles a = calcAngles(ind);
 		moveToAng(a.ang0, a.ang1);
 	}
@@ -488,7 +489,7 @@ private:
 	}
 
 	void moveToAng(int16_t angle0, int16_t angle1) {
-		msg << "arm: move to " << angle0/10 << angle1/10 << ", from " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
+		//msg << "arm: move to " << angle0/10 << angle1/10 << ", from " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
 		m0.wait();
 		m1.wait();
 		int16_t diff0 = angle0 - currentAng.ang0;
@@ -498,26 +499,26 @@ private:
 		m0.wait();
 		m1.wait();
 		currentAng = Angles(angle0, angle1);
-		msg << "arm: new positions is " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
-		msg << "arm: disable motors" << m::endl;
+		//msg << "arm: new positions is " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
+		//msg << "arm: disable motors" << m::endl;
 	}
 
 	void autoHomeImp() {
-		msg << "arm: homing" << m::tab;
+		//msg << "arm: homing" << m::tab;
 		m0.moveAngle(-1000, 10);
 		m1.moveAngle(1000, 8);
 		m0.wait();
 		m1.stop();
-		msg << "arm: m0 ready;" << m::tab;
+		//msg << "arm: m0 ready;" << m::tab;
 		m1.moveAngle(-1000, 10);
 		m1.wait();
-		msg << "arm: m1 ready" << m::tab;
+		//msg << "arm: m1 ready" << m::tab;
 		m0.moveAngle(initAngle);
 		m1.moveAngle(initAngle);
 		m0.wait();
 		m1.wait();
 		currentAng = Angles(initAngle + m0HomeAngle, initAngle + m1HomeAngle);
-		msg << "arm: done" << m::endl;
+		//msg << "arm: done" << m::endl;
 	}
 private:
 	StepMotor & m0;
@@ -607,6 +608,8 @@ class Eyes {
 			spi_send16(0x0C, 0x01);
 			spi_send16(0x0F, 0x00);
 			spi_send16(0x09, 0x00);
+			_delay_ms(100);
+			show(Thin);
 		}
 
 		void clear()
@@ -618,15 +621,19 @@ class Eyes {
 		}
 
 		enum Yeys {
-			Normal = 0,
-			Curios = 1,
-			Anger = 2,
-			Thin = 3,
-			Up,
-			Down,
-			Right,
-			Left,
+			Curios = 0,
+			Anger  = 1,
+			Thin   = 2,
+			Normal = 3,
+			Up     = 4,
+			Down   = 5,
+			Right  = 6,
+			Left   = 7,
 		};
+
+		void randomNormal() {
+			show(rand()%5 + Thin);
+		}
 
 		void show(uint8_t set) {
 			switch(set) {
@@ -679,16 +686,6 @@ class Eyes {
 private:
 		uint8_t eyes_set[4][8] =
 		{
-		{ // normal
-			0b00000000,
-			0b00000000,
-			0b00011000,
-			0b00111100,
-			0b00111100,
-			0b00011000,
-			0b00000000,
-			0b00000000,
-		},
 		{ // удивление
 			0b11111111,
 			0b00000000,
@@ -716,6 +713,16 @@ private:
 			0b11111111,
 			0b00000000,
 			0b00000000,
+			0b00000000,
+			0b00000000,
+		},
+		{ // normal
+			0b00000000,
+			0b00000000,
+			0b00011000,
+			0b00111100,
+			0b00111100,
+			0b00011000,
 			0b00000000,
 			0b00000000,
 		}
@@ -794,41 +801,50 @@ class EmoCore
 	public:
 		enum Event {
 			WakeUp,
-			Wating,
+			Waiting,
 			OppMoves,
 			IMove,
 			LostPieces,
 			WinPieces,
 			LostGame,
 			WinGame,
+			YourTurn,
+			ArrangeBoard,
+			Rules,
+			YouHaveNoMove,
+			IWin,
 		};
 
-		EmoCore(VoiceModule & voiceModule, Eyes & eyesModule)
+		EmoCore(VoiceModule & voiceModule)
 		: voiceM(voiceModule)
-		, eyesM(eyesModule)
+		{}
+
+		void say(Event e)
 		{
-		}
-	
-		void processEvent(Event e)
-		{
-			
 			uint8_t ind = rand();	
 			switch(e) {
-				case WakeUp: // say hello, say rules, ask arrange pieces
-					eyesM.show(Eyes::Thin);
+				case YouHaveNoMove:
+					voiceM.play(1,youhavenomove[0]);
+					break;
+				case Rules:
+					voiceM.play(1,rules[0]);// always say rules
+					break;
+				case WakeUp: // say hello
 					voiceM.play(1, hello[ind % sizeof(hello)]);
 					voiceM.play(1, hello[ind % sizeof(hello)]);
 					voiceM.wait();
-					eyesM.show(Eyes::Normal);
 					_delay_ms(1000);
 					voiceM.play(1,rules[0]);// always say rules
 					break;
-				case Wating: // say smth, joke?
-					if(rand()%2) {
-						voiceM.play(1, waiting[ind % sizeof(waiting)]);
-					} else {
+				case Waiting: // say smth, joke?
+					if(rand()%10 == 5) {
 						voiceM.play(1, jokes[ind % sizeof(jokes)]);
+					} else {
+						voiceM.play(1, waiting[waitingInd++ % sizeof(waiting)]);
 					}
+					break;
+				case YourTurn:
+						voiceM.play(1, yourTurn[ind % sizeof(yourTurn)]);
 					break;
 				case OppMoves:
 					voiceM.play(1, oppMoves[ind % sizeof(oppMoves)]);
@@ -845,8 +861,13 @@ class EmoCore
 				case LostGame:
 					voiceM.play(1, lostGame[ind % sizeof(lostGame)]);
 					break;
+				case IWin:
+					voiceM.play(1, iwin[0]);
 				case WinGame:
 					voiceM.play(1, winGame[ind % sizeof(winGame)]);
+					break;
+				case ArrangeBoard:
+					voiceM.play(1, arrangeBoard[ind % sizeof(arrangeBoard)]);
 					break;
 				default:
 					break;
@@ -865,9 +886,16 @@ class EmoCore
 		const uint8_t lostGame[10] = {91,92,93,94,95,100,101,102,103,104};
 		const uint8_t waiting[7] = {110,111,112,113,114,115,119};
 		const uint8_t jokes[3] = {116,117,118};
+		const uint8_t yourTurn[4] = {131,132,133,134};
+		const uint8_t arrangeBoard[1] = {136};
+		const uint8_t igiveup[3] = {128,128,130};
+		const uint8_t hopeyoumakeaturn[1] = {135};
+		const uint8_t youhavenopeices[1] = {127};
+		const uint8_t iwin[1] = {125};
+		const uint8_t youhavenomove[1] = {126};
 
 		VoiceModule & voiceM;
-		Eyes & eyesM;
+		uint8_t waitingInd = 0;
 };
 
 class HumanMoveDetector 
@@ -959,19 +987,8 @@ class HumanMoveDetector
 			return BoardEvent();
 		}
 
-		bool isBoardInit()
+		inline bool isBoardInit()
 		{
-			/*
-			uint32_t state = getState();
-			for(int i = 0; i < 8; ++i) {
-				for(int j = 0; j < 4; ++j) {
-					msg << (state & 1);
-					state >>= 1;
-				}
-				msg << m::tab;
-			}
-			msg << m::endl;
-			*/
 			return getState() == 0x000ff000;
 		}
 	
@@ -1014,7 +1031,7 @@ Servo servo(magnito);
 MecanicalArm arm(m0, m1, motEn, servo);
 Eyes eyes;
 VoiceModule voice(voiceTx, voiceBusy);
-EmoCore emoCore(voice, eyes);
+EmoCore emoCore(voice);
 HumanMoveDetector moveDetector(boardLoad);
 Game game;
 
@@ -1064,6 +1081,32 @@ ISR(TIMER1_OVF_vect)
 	m1.onStepHandler();
 }
 
+class LoopDelay {
+	public:
+		LoopDelay() = delete;
+		LoopDelay(uint8_t delayCnt, bool fireOnStart) 
+			: delay(delayCnt)
+		{
+			if(fireOnStart) {
+				cnt = delay;
+			}
+		}
+
+		operator bool() {
+			if(cnt == delay) {
+				cnt = 0;
+				return true;
+			} else {
+				cnt++;
+				return false;
+			}
+		}
+	
+	private:
+		uint8_t cnt = 0;
+		uint8_t delay = 0;
+};
+
 int main(void)
 {
 
@@ -1105,10 +1148,9 @@ int main(void)
 	sei();
 
 	eyes.init();
-	eyes.clear();
-	_delay_ms(1000);
-	//emoCore.processEvent(EmoCore::Event::WakeUp);
 	arm.init();
+	emoCore.say(EmoCore::Event::WakeUp);
+	eyes.randomNormal();
 
 	/* solver test
 	AngleSolver solver;
@@ -1123,15 +1165,13 @@ int main(void)
 	solver.solve(-170, 110);
 	*/
 	uint8_t cnt = 0;
-
-
+/*
 	arm.test();
-
 	while(1) {
 		eyes.show(rand()%8);
 		_delay_ms(100);
 	}
-
+*/
 	while(1)
 	{
 		_delay_ms(100);
@@ -1141,29 +1181,33 @@ int main(void)
 		switch(game.getState())
 		{
 			case Game::WaitForBoardInit:
-				if(moveDetector.isBoardInit()) {
+				{
+					LoopDelay d10(10, true);
+					LoopDelay d100(10, false);
+					while(!moveDetector.isBoardInit()) {
+						if(d10) {
+							emoCore.say(EmoCore::Event::Waiting);
+							_delay_ms(1000);
+							if(d100) {
+								emoCore.say(EmoCore::Event::Rules);
+							}
+
+						} else {
+							eyes.randomNormal();
+							_delay_ms(2000);
+						}
+					}
 					moveDetector.saveBoard();
-					// ask make first move
 					game.startGame();
-				} else {
-					// joke, ask to init the board
 				}
 				break;
-
-			case Game::TheirMove:
-				// wait for 10 sec, than ask to make a move, repeat
-				/*if(BoardEvent e = moveDetector.checkBoard())
-				{
-					msg << "Detect event - ind: " << e.ind << ", e: " << e.event;
-				
-					game.applyBoardEvent(e);
-					// react some how
-					eyes.show(rand());
-				}*/
-	//			break;
-
+/*
 			case Game::WaitTheirFirstMove:
 				{
+					emoCore.say(EmoCore::YourTurn);
+					Moves ms;
+					game.getTheirMove(ms);
+
 					static uint8_t waitCnt = 0;
 					static bool moveInProgress = false;
 
@@ -1196,6 +1240,36 @@ int main(void)
 						msg << "just wait first move" << m::endl;
 						//joke, ask to make a move
 					}
+				}
+				break;
+*/			
+			case Game::TheirMove:
+				{
+					// calc possible moves
+					Moves ms;
+					game.getTheirMove(ms);
+
+					if(!ms.size()) {
+						eyes.show(Eyes::Curios);
+						emoCore.say(EmoCore::YouHaveNoMove);
+						emoCore.say(EmoCore::IWin);
+						eyes.show(Eyes::Normal);
+						game.reset();
+					}
+
+					// wait move started
+					LoopDelay ld20 (10, true);
+					while(!moveDetector.waitForMoveStarted()) {
+						if(ld20) {
+							emoCore.say(EmoCore::YourTurn);
+							_delay_ms(2000);
+						} else {
+							_delay_ms(2000);
+							eyes.randomNormal();
+						}
+					}
+					// move started
+					//TODO: detect move finished using ms;
 				}
 				break;
 
