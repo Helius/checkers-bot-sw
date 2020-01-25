@@ -18,5 +18,5 @@ add_avr_executable(
 find_library(C_LIB c)
 message(STATUS "avr-libc: ${C_LIB}")
 
-avr_target_link_libraries(checkers hallib misclib ${C_LIB})
+avr_target_link_libraries(checkers hallib misclib "/usr/lib/gcc/avr/5.4.0/avr5/libgcc.a")
 

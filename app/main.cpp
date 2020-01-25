@@ -15,12 +15,7 @@
 
 
 /* TODO
- - add detecting piece became a king
  - detect win/loose event (white and black)
- - add timer for eyes and connect it with game events
- - cteate dropping pieces outside board on take
- - create a video, send it to robotex whatsapp
- - 
  
  --- feature cut ------
  - moves randomising
@@ -108,6 +103,7 @@ class StepMotor {
 				*value = 250/speed;
 			} else {
 				stopTimer();
+				stepCount = 0;
 			}
 		}
 
@@ -280,11 +276,6 @@ xOff,yOff | board
 
 class BoardGeometry {
 public:
-	// offset from
-	BoardGeometry(uint16_t x, uint16_t y)
-		: offset(x,y)
-	{}
-
 	Point indToPoint(uint8_t ind)
 	{
 		if(ind < 100) { // ind on board
@@ -292,11 +283,11 @@ public:
 			uint8_t col = ind / 8;
 
 			return Point(
-					row*cellSize + cellSize/2 + margin + offset.x,
-					size + offset.y - (col*cellSize + cellSize/2 + margin));
+					row*cellSize + cellSize/2 + margin + offsetx,
+					size + offsety - (col*cellSize + cellSize/2 + margin));
 		} else { // ind outside board
 			uint8_t tInd = (ind - 100)%12;
-			return Point(offset.x-(tInd%3)*cellSize-cellSize, offset.y+85+(tInd/4)*cellSize);
+			return Point(offsetx-(tInd%3)*cellSize-cellSize, offsety+85+(tInd/4)*cellSize);
 		}
 	}
 
@@ -304,7 +295,8 @@ private:
 	static constexpr uint16_t size = 290;
 	static constexpr uint8_t margin = 25;
 	static constexpr uint8_t cellSize = 30;
-	const Point offset;
+	static constexpr int8_t offsety = 65;
+	static constexpr int16_t offsetx = -145;//-160;
 };
 
 class AngleSolver
@@ -330,8 +322,6 @@ class AngleSolver
 			bool diff = !((a>=0 && x>=0) || (a<=0 && b<=0));
 			int64_t rx = x0 + multb;
 			int64_t ry = 0;
-
-			//msg << "solver: ram usage: " << ramUsage();
 
 			if(diff) {
 				ry = y0 + multa;
@@ -359,7 +349,6 @@ public:
 		, m1(motor1)
 		, motEn(motorEn)
 		, srv(servo)
-		, b(boardOffsetX, boardOffsetY) // board offset
 	{
 		motEn.clear();
 	}
@@ -477,7 +466,6 @@ private:
 
 	void moveToInd(uint8_t ind)
 	{
-		//msg << "= move to ind " << ind << m::endl;
 		Angles a = calcAngles(ind);
 		moveToAng(a.ang0, a.ang1);
 	}
@@ -500,7 +488,6 @@ private:
 		m1.wait();
 		currentAng = Angles(angle0, angle1);
 		//msg << "arm: new positions is " << currentAng.ang0/10 << currentAng.ang1/10 << m::endl;
-		//msg << "arm: disable motors" << m::endl;
 	}
 
 	void autoHomeImp() {
@@ -518,7 +505,7 @@ private:
 		m0.wait();
 		m1.wait();
 		currentAng = Angles(initAngle + m0HomeAngle, initAngle + m1HomeAngle);
-		//msg << "arm: done" << m::endl;
+		//msg << "arm: home done" << m::endl;
 	}
 private:
 	StepMotor & m0;
@@ -529,9 +516,7 @@ private:
 	AngleSolver solver;
 	Angles currentAng;
 	//const uint8_t lengths[2] = {245, 176};
-	const uint8_t lengths[2] = {245, 167};
-	static constexpr int8_t boardOffsetY = 65;
-	static constexpr int16_t boardOffsetX = -145;//-160;
+	static constexpr uint8_t lengths[2] = {245, 167};
 	static constexpr int8_t m0HomeAngle = 35;
 	static constexpr int8_t m1HomeAngle = 30;
 	static constexpr int8_t initAngle = 50;
@@ -586,6 +571,49 @@ void spi_send16(uint8_t addr, uint8_t data, bool sym = false)
 	eyesLoad.set();
 	_delay_ms(1);
 }
+const uint8_t eyes_set[4][8] PROGMEM =
+{
+{ // удивление
+	0b11111111,
+	0b00000000,
+	0b00111100,
+	0b01000010,
+	0b01000010,
+	0b01000010,
+	0b00111100,
+	0b00000000,
+},
+{ // ярость
+	0b11100000,
+	0b00111100,
+	0b00000111,
+	0b00000000,
+	0b00001110,
+	0b00001110,
+	0b00001110,
+	0b00000000,
+},
+{ // подозрительность
+	0b00000000,
+	0b00000000,
+	0b11111111,
+	0b11111111,
+	0b00000000,
+	0b00000000,
+	0b00000000,
+	0b00000000,
+},
+{ // normal
+	0b00000000,
+	0b00000000,
+	0b00011000,
+	0b00111100,
+	0b00111100,
+	0b00011000,
+	0b00000000,
+	0b00000000,
+}
+};
 
 class Eyes {
 	public:
@@ -631,6 +659,23 @@ class Eyes {
 			Left   = 7,
 		};
 
+		void printBoard(uint32_t state) {
+			
+			for(uint8_t i = 0; i < 8; i++)
+			{
+				uint8_t mask = 0;
+
+				for(uint8_t j = 0; j < 4; j++) {
+					uint32_t tmp = 1;
+					tmp <<= i * 4 + j;
+					if(!(state & tmp)) {
+						mask |= 1 << (i%2 ? j*2+1 : j*2);
+					}
+				}
+				spi_send16(i+1, mask, false);
+			}
+		}
+
 		void randomNormal() {
 			show(rand()%5 + Thin);
 		}
@@ -643,7 +688,7 @@ class Eyes {
 				case Thin:
 					for(int i = 1; i < 9; i++)
 					{
-						spi_send16(i, eyes_set[set][8-i], true);
+						spi_send16(i, pgm_read_byte(&(eyes_set[set][8-i])), true);
 					}
 					break;
 				case Up:
@@ -653,13 +698,13 @@ class Eyes {
 					}
 					for(int i = 5; i < 9; i++)
 					{
-						spi_send16(i, eyes_set[Normal][10-i], true);
+						spi_send16(i, pgm_read_byte(&(eyes_set[Normal][10-i])), true);
 					}
 					break;
 				case Down:
 					for(int i = 1; i < 5; i++)
 					{
-						spi_send16(i, eyes_set[Normal][6-i], true);
+						spi_send16(i, pgm_read_byte(&(eyes_set[Normal][6-i])), true);
 					}
 					for(int i = 5; i < 9; i++)
 					{
@@ -669,65 +714,19 @@ class Eyes {
 				case Right:
 					for(int i = 1; i < 9; i++)
 					{
-						spi_send16(i, eyes_set[Normal][8-i]>>2);
+						spi_send16(i, pgm_read_byte(&(eyes_set[Normal][8-i]))>>2);
 					}
 					break;
 				case Left:
 					for(int i = 1; i < 9; i++)
 					{
-						spi_send16(i, eyes_set[Normal][8-i]<<2);
+						spi_send16(i, pgm_read_byte(&(eyes_set[Normal][8-i]))<<2);
 					}
 					break;
 				default:
 					break;
 			}
 		}
-
-private:
-		uint8_t eyes_set[4][8] =
-		{
-		{ // удивление
-			0b11111111,
-			0b00000000,
-			0b00111100,
-			0b01000010,
-			0b01000010,
-			0b01000010,
-			0b00111100,
-			0b00000000,
-		},
-		{ // ярость
-			0b11100000,
-			0b00111100,
-			0b00000111,
-			0b00000000,
-			0b00001110,
-			0b00001110,
-			0b00001110,
-			0b00000000,
-		},
-		{ // подозрительность
-			0b00000000,
-			0b00000000,
-			0b11111111,
-			0b11111111,
-			0b00000000,
-			0b00000000,
-			0b00000000,
-			0b00000000,
-		},
-		{ // normal
-			0b00000000,
-			0b00000000,
-			0b00011000,
-			0b00111100,
-			0b00111100,
-			0b00011000,
-			0b00000000,
-			0b00000000,
-		}
-		};
-		
 };
 
 class VoiceModule {
@@ -763,6 +762,7 @@ class VoiceModule {
 */		
 		void wait() {
 			while(!busy) {
+				//msg << "busy is " << (PINC & (1 << 5)) << m::endl;
 				_delay_ms(200);
 			}
 		}
@@ -796,6 +796,24 @@ class VoiceModule {
 		InPin & busy;
 };
 
+const uint8_t hello[11] PROGMEM = {1,3,4,5,6,7,8,9,119,120,121};
+const uint8_t rules[1] PROGMEM = {10};
+const uint8_t myMove[3] PROGMEM = {20,21,24};
+const uint8_t oppMoves[10]  PROGMEM = {50,51,61,62,63,64,65,68,69,70};
+const uint8_t lostPieces[28]  PROGMEM = {40,41,42,43,44,45,46,47,48,49,50,51,52,53,60,61,62,63,64,65,66,67,68,69,70,71,72,73};
+const uint8_t winPieces[16]  PROGMEM = {74,75,76,80,20,21,22,23,24,25,26,27,28,29,30,122};
+const uint8_t winGame[12]  PROGMEM = {80,81,82,83,84,85,86,87,90,91,92,94};
+const uint8_t lostGame[10]  PROGMEM = {91,92,93,94,95,100,101,102,103,104};
+const uint8_t waiting[7]  PROGMEM = {110,111,112,113,114,115,119};
+const uint8_t jokes[3]  PROGMEM = {116,117,118};
+const uint8_t yourTurn[4]  PROGMEM = {131,132,133,134};
+const uint8_t arrangeBoard[1]  PROGMEM = {136};
+const uint8_t igiveup[3]  PROGMEM = {128,128,130};
+const uint8_t hopeyoumakeaturn[1]  PROGMEM = {135};
+const uint8_t youhavenopeices[1]  PROGMEM = {127};
+const uint8_t iwin[1]  PROGMEM = {125};
+const uint8_t youhavenomove[1]  PROGMEM = {126};
+
 class EmoCore 
 {
 	public:
@@ -824,50 +842,50 @@ class EmoCore
 			uint8_t ind = rand();	
 			switch(e) {
 				case YouHaveNoMove:
-					voiceM.play(1,youhavenomove[0]);
+					voiceM.play(1,pgm_read_byte(&(youhavenomove[0])));
 					break;
 				case Rules:
-					voiceM.play(1,rules[0]);// always say rules
+					voiceM.play(1,pgm_read_byte(&(rules[0])));// always say rules
 					break;
 				case WakeUp: // say hello
-					voiceM.play(1, hello[ind % sizeof(hello)]);
-					voiceM.play(1, hello[ind % sizeof(hello)]);
+					voiceM.play(1, pgm_read_byte(&(hello[ind % sizeof(hello)])));
+					//voiceM.play(1, pgm_read_byte(&(hello[ind % sizeof(hello)])));
 					voiceM.wait();
 					_delay_ms(1000);
-					voiceM.play(1,rules[0]);// always say rules
+					//voiceM.play(1,pgm_read_byte(&(rules[0])));// always say rules
 					break;
 				case Waiting: // say smth, joke?
 					if(rand()%10 == 5) {
-						voiceM.play(1, jokes[ind % sizeof(jokes)]);
+						voiceM.play(1, pgm_read_byte(&(jokes[ind % sizeof(jokes)])));
 					} else {
-						voiceM.play(1, waiting[waitingInd++ % sizeof(waiting)]);
+						voiceM.play(1, pgm_read_byte(&(waiting[waitingInd++ % sizeof(waiting)])));
 					}
 					break;
 				case YourTurn:
-						voiceM.play(1, yourTurn[ind % sizeof(yourTurn)]);
+						voiceM.play(1, pgm_read_byte(&(yourTurn[ind % sizeof(yourTurn)])));
 					break;
 				case OppMoves:
-					voiceM.play(1, oppMoves[ind % sizeof(oppMoves)]);
+					voiceM.play(1, pgm_read_byte(&(oppMoves[ind % sizeof(oppMoves)])));
 					break;
 				case IMove:
-					voiceM.play(1, myMove[ind % sizeof(myMove)]);
+					voiceM.play(1, pgm_read_byte(&(myMove[ind % sizeof(myMove)])));
 					break;
 				case LostPieces:
-					voiceM.play(1, lostPieces[ind % sizeof(lostPieces)]);
+					voiceM.play(1, pgm_read_byte(&(lostPieces[ind % sizeof(lostPieces)])));
 					break;
 				case WinPieces: 
-					voiceM.play(1, winPieces[ind % sizeof(winPieces)]);
+					voiceM.play(1, pgm_read_byte(&(winPieces[ind % sizeof(winPieces)])));
 					break;
 				case LostGame:
-					voiceM.play(1, lostGame[ind % sizeof(lostGame)]);
+					voiceM.play(1, pgm_read_byte(&(lostGame[ind % sizeof(lostGame)])));
 					break;
 				case IWin:
-					voiceM.play(1, iwin[0]);
+					voiceM.play(1, pgm_read_byte(&(iwin[0])));
 				case WinGame:
-					voiceM.play(1, winGame[ind % sizeof(winGame)]);
+					voiceM.play(1, pgm_read_byte(&(winGame[ind % sizeof(winGame)])));
 					break;
 				case ArrangeBoard:
-					voiceM.play(1, arrangeBoard[ind % sizeof(arrangeBoard)]);
+					voiceM.play(1, pgm_read_byte(&(arrangeBoard[ind % sizeof(arrangeBoard)])));
 					break;
 				default:
 					break;
@@ -875,25 +893,7 @@ class EmoCore
 			
 		}
 	private:
-		
-		const uint8_t hello[11] = {1,3,4,5,6,7,8,9,119,120,121};
-		const uint8_t rules[1] = {10};
-		const uint8_t myMove[3] = {20,21,24};
-		const uint8_t oppMoves[10] = {50,51,61,62,63,64,65,68,69,70};
-		const uint8_t lostPieces[28] = {40,41,42,43,44,45,46,47,48,49,50,51,52,53,60,61,62,63,64,65,66,67,68,69,70,71,72,73};
-		const uint8_t winPieces[16] = {74,75,76,80,20,21,22,23,24,25,26,27,28,29,30,122};
-		const uint8_t winGame[12] = {80,81,82,83,84,85,86,87,90,91,92,94};
-		const uint8_t lostGame[10] = {91,92,93,94,95,100,101,102,103,104};
-		const uint8_t waiting[7] = {110,111,112,113,114,115,119};
-		const uint8_t jokes[3] = {116,117,118};
-		const uint8_t yourTurn[4] = {131,132,133,134};
-		const uint8_t arrangeBoard[1] = {136};
-		const uint8_t igiveup[3] = {128,128,130};
-		const uint8_t hopeyoumakeaturn[1] = {135};
-		const uint8_t youhavenopeices[1] = {127};
-		const uint8_t iwin[1] = {125};
-		const uint8_t youhavenomove[1] = {126};
-
+	
 		VoiceModule & voiceM;
 		uint8_t waitingInd = 0;
 };
@@ -932,9 +932,9 @@ class HumanMoveDetector
 			s <<= 8;
 			s |= d[0];
 
-			msg << "board getState: ";
-			printHex32(s);
-			msg << m::endl;
+			//msg << "board getState: ";
+			//printHex32(s);
+			//msg << m::endl;
 			return s;
 		}
 
@@ -945,7 +945,7 @@ class HumanMoveDetector
 		bool waitForMoveStarted() {
 			return getState() != prev;
 		}
-
+/*
 		uint8_t getChangesCount()
 		{
 			uint32_t state = getState();
@@ -968,23 +968,24 @@ class HumanMoveDetector
 			}
 			return cnt;
 		}
-
-		BoardEvent getEvent(uint8_t ind) {
+*/
+		BoardDiff getBoardDiff() {
+			BoardDiff bdiff;
 			uint32_t state = getState();
 			uint32_t diff = state ^ prev;
-			uint8_t cnt = 0;
 			for(uint8_t i = 0; i < 32; ++i) {
 				if(diff & 1)
 				{
-					if(cnt == ind) {
-						return BoardEvent((i/4)%2 ? i*2+1 : i*2, (state & diff & 1) ? BoardEvent::Up : BoardEvent::Down);
+					if(state & diff & 1) {
+						bdiff.setUp((i/4)%2 ? i*2+1 : i*2);
+					} else {
+						bdiff.setDown((i/4)%2 ? i*2+1 : i*2);
 					}
-					cnt++;
 				}
 				diff >>= 1;
 				state >>= 1;
 			}
-			return BoardEvent();
+			return bdiff;
 		}
 
 		inline bool isBoardInit()
@@ -1005,12 +1006,11 @@ class HumanMoveDetector
 
 	private:
 		OutPin & load;
-		bool init = false;
 		uint32_t prev;
 };
 
 // Objects
-OutPin led(&DDRB, &PORTB, PIN5);     // on board led
+//OutPin led(&DDRB, &PORTB, PIN5);     // on board led
 OutPin m0dir(&DDRD, &PORTD, PIN7);   // PD7 is direction for motor 2
 OutPin m1dir(&DDRB, &PORTB, PIN0);   // PB0 is direction for motor 1
 OutPin motEn(&DDRB, &PORTB, PIN2);   // enable morots drivers
@@ -1138,7 +1138,8 @@ int main(void)
 	SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR1); // enable SPI, MASTER mode, prescaler 1/v	
 
 	uart_init(0);
-	msg << m::endl << m::tab << "~ CheckersBot v1.0 ~" << m::endl;
+	msg << m::endl << m::tab << "~ CBot v1.0 ~" << m::endl;
+	msg << "mem: " << (uint16_t)memfree() << "sizes:" << sizeof(Moves) << sizeof(Move2) << sizeof(Step) << m::endl;
 
 	// use eeprom for seed
 	uint16_t val = eeprom_read_word(0);
@@ -1164,7 +1165,6 @@ int main(void)
 	solver.solve(-60,  110);
 	solver.solve(-170, 110);
 	*/
-	uint8_t cnt = 0;
 /*
 	arm.test();
 	while(1) {
@@ -1176,7 +1176,7 @@ int main(void)
 	{
 		_delay_ms(100);
 		
-		msg << "game state is " << game.getState() << m::endl;
+		msg << "game st is " << game.getState() << m::endl;
 
 		switch(game.getState())
 		{
@@ -1186,68 +1186,31 @@ int main(void)
 					LoopDelay d100(10, false);
 					while(!moveDetector.isBoardInit()) {
 						if(d10) {
-							emoCore.say(EmoCore::Event::Waiting);
+							emoCore.say(EmoCore::Waiting);
 							_delay_ms(1000);
 							if(d100) {
-								emoCore.say(EmoCore::Event::Rules);
+								emoCore.say(EmoCore::Rules);
 							}
 
 						} else {
-							eyes.randomNormal();
-							_delay_ms(2000);
+							eyes.printBoard(moveDetector.getState());
+							_delay_ms(1000);
 						}
 					}
 					moveDetector.saveBoard();
 					game.startGame();
 				}
 				break;
-/*
-			case Game::WaitTheirFirstMove:
-				{
-					emoCore.say(EmoCore::YourTurn);
-					Moves ms;
-					game.getTheirMove(ms);
-
-					static uint8_t waitCnt = 0;
-					static bool moveInProgress = false;
-
-					if(!moveInProgress && moveDetector.waitForMoveStarted()) {
-						msg << "detect move started" << m::endl;
-						// human start moving
-						moveInProgress = true;
-					} else if(moveInProgress) {
-						waitCnt++;
-						if(waitCnt > 50) {
-							waitCnt = 0;
-							moveInProgress = false;
-							// decide move is finished
-							
-							uint8_t chCnt = moveDetector.getChangesCount();
-							
-							msg << "Decide move is finished, changes cnt: " << chCnt << m::endl;
-
-							for(int i = 0; i < chCnt; ++i) {
-								BoardEvent e = moveDetector.getEvent(i);
-								msg << "Apply event: " << e.ind << ", " << e.event << m::endl;
-								game.applyBoardEvent(e);
-							}
-							moveDetector.saveBoard();
-							game.moveFinished();
-						} else {
-							msg << "wait move finished" << m::endl;
-						}
-					} else {
-						msg << "just wait first move" << m::endl;
-						//joke, ask to make a move
-					}
-				}
-				break;
-*/			
 			case Game::TheirMove:
 				{
 					// calc possible moves
 					Moves ms;
 					game.getTheirMove(ms);
+					msg << "founded " << ms.size() << " moves" << m::endl;
+					for(uint8_t i = 0; i < ms.size(); i++) {
+						msg << "\tfrom " << ms.get(i).getFrom()
+							<< " to " <<  ms.get(i).front().to << m::endl;
+					}
 
 					if(!ms.size()) {
 						eyes.show(Eyes::Curios);
@@ -1258,40 +1221,71 @@ int main(void)
 					}
 
 					// wait move started
-					LoopDelay ld20 (10, true);
+					LoopDelay ld20 (8, true);
 					while(!moveDetector.waitForMoveStarted()) {
 						if(ld20) {
 							emoCore.say(EmoCore::YourTurn);
-							_delay_ms(2000);
+							_delay_ms(1000);
 						} else {
-							_delay_ms(2000);
-							eyes.randomNormal();
+							_delay_ms(3000);
+							eyes.printBoard(moveDetector.getState());
+							//eyes.randomNormal();
 						}
 					}
+
 					// move started
-					//TODO: detect move finished using ms;
+					uint8_t waitCount = 0;
+					while(1) { // wait move finish
+						waitCount++;
+						// check board changes match moves
+						BoardDiff bdiff = moveDetector.getBoardDiff();
+						if(bdiff) {
+							msg << "diff detected " << bdiff.up[0] << " to " << bdiff.down << m::endl;
+							Move2 m = bdiff.match(ms);
+							if(m) {
+								_delay_ms(500);
+								emoCore.say(EmoCore::OppMoves);
+								msg << "move recognized" << m::endl;
+								game.applyTheirMove(m);
+								moveDetector.saveBoard();
+								break;
+							}
+							if(waitCount > 200) {
+								// can't detect move
+							}
+						}
+						_delay_ms(1000); //TODO
+					}
 				}
 				break;
 
 			case Game::MyMove:
 				{
 					// say smth
-					msg << "find my move with ram: " << ramUsage() << m::endl;
 					Move2 move = game.getMyMove();
+					msg << "find my move " << !!move << m::endl;
 					if(move) {
-						arm.move(63,54);
+						emoCore.say(EmoCore::IMove);
+						arm.move(move.getFrom(),move.getStep(0).to);
+						for(uint8_t i = 0; i < move.size(); ++i) {
+							Step s = move.getStep(i);
+							if(s.take != -1) {
+								arm.take(s.take);
+							}
+						}
 						arm.home();
-						arm.move(63,54);
-						arm.home();
-						arm.move(63,54);
-						arm.home();
-						//arm.move(move.getFrom(),move.getStep(0).to);
-						//arm.home();
-						game.myMoveApplyed();
+						_delay_ms(500);
+						moveDetector.saveBoard();
+						game.myMoveApplyed(move);
 					} else {
+						msg << "MyMove: find bad move...";
+						while(1) {
+							_delay_ms(200);
+							eyes.randomNormal();
+						}
 						// i give up (no move were found)
-						game.giveUp();
-						arm.init();
+						//game.giveUp();
+						//arm.init();
 					}
 				}
 				break;
@@ -1307,15 +1301,6 @@ int main(void)
 				game.reset();
 				arm.init();
 				break;
-		}
-
-		// about 1 sec calls
-		cnt++;
-		if(cnt > 20) {
-			cnt = 0;
-			eyes.show(rand()%8);
-
-			//led.toggle();
 		}
 	}
 }
