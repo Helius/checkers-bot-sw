@@ -56,10 +56,9 @@ void printHex32(uint32_t numb)
 extern uint8_t _end;
 extern uint8_t __stack;
 
-uint8_t ramUsage()
+uint16_t memfree()
 {
-	uint16_t a;
-	a =	(100*((uint16_t)&__stack-(uint16_t)&a))/((uint16_t)&__stack-(uint16_t)&_end);
-	return a;
+	uint8_t a;
+	return	((uint16_t)&a) - ((uint16_t)&_end);
 }
 

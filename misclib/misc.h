@@ -11,7 +11,7 @@ void printNumb(int16_t numb);
 void msg(const char * str);
 void msg(int16_t numb);
 */
-uint8_t ramUsage();
+uint16_t memfree();
 
 class Message {
 public:
