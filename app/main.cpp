@@ -287,7 +287,7 @@ public:
 					size + offsety - (col*cellSize + cellSize/2 + margin));
 		} else { // ind outside board
 			uint8_t tInd = (ind - 100)%12;
-			return Point(offsetx-(tInd%3)*cellSize-cellSize, offsety+85+(tInd/4)*cellSize);
+			return Point(offsetx-(tInd%3)*cellSize-cellSize-10, offsety+85+(tInd/3)*cellSize+10);
 		}
 	}
 
@@ -492,8 +492,8 @@ private:
 
 	void autoHomeImp() {
 		//msg << "arm: homing" << m::tab;
-		m0.moveAngle(-1000, 10);
-		m1.moveAngle(1000, 8);
+		m0.moveAngle(-1200, 10);
+		m1.moveAngle(1200, 8);
 		m0.wait();
 		m1.stop();
 		//msg << "arm: m0 ready;" << m::tab;
@@ -831,6 +831,7 @@ class EmoCore
 			Rules,
 			YouHaveNoMove,
 			IWin,
+			GiveUp,
 		};
 
 		EmoCore(VoiceModule & voiceModule)
@@ -841,6 +842,9 @@ class EmoCore
 		{
 			uint8_t ind = rand();	
 			switch(e) {
+				case GiveUp:
+					voiceM.play(1,pgm_read_byte(&(igiveup[ind%sizeof(igiveup)])));
+					break;
 				case YouHaveNoMove:
 					voiceM.play(1,pgm_read_byte(&(youhavenomove[0])));
 					break;
@@ -939,6 +943,7 @@ class HumanMoveDetector
 		}
 
 		void saveBoard() {
+			msg << "------- save board --------" << m::endl;
 			prev = getState();
 		}
 
@@ -1165,13 +1170,7 @@ int main(void)
 	solver.solve(-60,  110);
 	solver.solve(-170, 110);
 	*/
-/*
-	arm.test();
-	while(1) {
-		eyes.show(rand()%8);
-		_delay_ms(100);
-	}
-*/
+	
 	while(1)
 	{
 		_delay_ms(100);
@@ -1206,18 +1205,15 @@ int main(void)
 					// calc possible moves
 					Moves ms;
 					game.getTheirMove(ms);
-					msg << "founded " << ms.size() << " moves" << m::endl;
-					for(uint8_t i = 0; i < ms.size(); i++) {
-						msg << "\tfrom " << ms.get(i).getFrom()
-							<< " to " <<  ms.get(i).front().to << m::endl;
-					}
-
 					if(!ms.size()) {
-						eyes.show(Eyes::Curios);
-						emoCore.say(EmoCore::YouHaveNoMove);
-						emoCore.say(EmoCore::IWin);
-						eyes.show(Eyes::Normal);
-						game.reset();
+						msg << "They have no moves!" << m::endl;
+						if(game.doIWin()) {
+							eyes.show(Eyes::Curios);
+							emoCore.say(EmoCore::WinGame);
+							game.reset();
+							arm.init();
+						}
+
 					}
 
 					// wait move started
@@ -1228,8 +1224,7 @@ int main(void)
 							_delay_ms(1000);
 						} else {
 							_delay_ms(3000);
-							eyes.printBoard(moveDetector.getState());
-							//eyes.randomNormal();
+							eyes.randomNormal();
 						}
 					}
 
@@ -1240,21 +1235,34 @@ int main(void)
 						// check board changes match moves
 						BoardDiff bdiff = moveDetector.getBoardDiff();
 						if(bdiff) {
-							msg << "diff detected " << bdiff.up[0] << " to " << bdiff.down << m::endl;
-							Move2 m = bdiff.match(ms);
-							if(m) {
+							msg << "diff: " << bdiff.up[0] << " to " << bdiff.down << m::endl;
+							if(ms.size() && ms.hasTakes()) {
+								msg << "They have to take" << m::endl;
+								Move2 m = bdiff.match(ms);
+								if(m) {
+									msg << "move recognized" << m::endl;
+									game.applyTheirMove(m);
+									moveDetector.saveBoard();
+									_delay_ms(500);
+									emoCore.say(EmoCore::LostPieces);
+									break;
+								}
+							} else {
+								Move2 rawMove(bdiff.up[0]);
+								Step step(bdiff.down);
+								// became King
+								if(bdiff.down > 54) {
+									step.becameKing = true;
+								}
+								rawMove.addStep(step);
+								game.applyTheirMove(rawMove);
+								moveDetector.saveBoard();
 								_delay_ms(500);
 								emoCore.say(EmoCore::OppMoves);
-								msg << "move recognized" << m::endl;
-								game.applyTheirMove(m);
-								moveDetector.saveBoard();
 								break;
 							}
-							if(waitCount > 200) {
-								// can't detect move
-							}
 						}
-						_delay_ms(1000); //TODO
+						_delay_ms(300); //TODO
 					}
 				}
 				break;
@@ -1263,43 +1271,41 @@ int main(void)
 				{
 					// say smth
 					Move2 move = game.getMyMove();
-					msg << "find my move " << !!move << m::endl;
 					if(move) {
-						emoCore.say(EmoCore::IMove);
-						arm.move(move.getFrom(),move.getStep(0).to);
+						msg << "find my move " << move.getFrom() << move.front().to << m::endl;
+						bool hasTake = false;
+						arm.move(move.getFrom(),move.getStep(move.size()-1).to);
 						for(uint8_t i = 0; i < move.size(); ++i) {
 							Step s = move.getStep(i);
 							if(s.take != -1) {
 								arm.take(s.take);
+								hasTake = true;
+							}
+							if(s.becameKing) {
+								arm.makeKing(move.getStep(move.size()-1).to);
 							}
 						}
+						if(hasTake) {
+							emoCore.say(EmoCore::WinPieces);
+						} else {
+							emoCore.say(EmoCore::IMove);
+						} 
 						arm.home();
-						_delay_ms(500);
 						moveDetector.saveBoard();
+						_delay_ms(500);
 						game.myMoveApplyed(move);
 					} else {
-						msg << "MyMove: find bad move...";
-						while(1) {
-							_delay_ms(200);
-							eyes.randomNormal();
+						msg << "MyMove: find bad move..." << m::endl;
+						eyes.show(Eyes::Anger);
+						if(!game.doTheirWin()) {
+							emoCore.say(EmoCore::GiveUp);
 						}
+						emoCore.say(EmoCore::LostGame);
 						// i give up (no move were found)
-						//game.giveUp();
-						//arm.init();
+						game.giveUp();
+						arm.init();
 					}
 				}
-				break;
-
-			case Game::IWin:
-				// say thankyou and reset game
-				game.reset();
-				arm.init();
-				break;
-
-			case Game::TheyWin:
-				// say thankyou and reset game
-				game.reset();
-				arm.init();
 				break;
 		}
 	}
