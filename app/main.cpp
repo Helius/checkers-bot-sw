@@ -15,7 +15,6 @@
 
 
 /* TODO
- - detect win/loose event (white and black)
  
  --- feature cut ------
  - moves randomising
@@ -79,9 +78,9 @@ class StepMotor {
 		}
 
 		void stop() {
+			stopTimer();
 			stepCount = 0;
 			endPoint = 0;
-			stopTimer();
 		}
 
 		void onStepHandler() {
@@ -287,7 +286,7 @@ public:
 					size + offsety - (col*cellSize + cellSize/2 + margin));
 		} else { // ind outside board
 			uint8_t tInd = (ind - 100)%12;
-			return Point(offsetx-(tInd%3)*cellSize-cellSize-10, offsety+85+(tInd/3)*cellSize+10);
+			return Point(offsetx-(tInd%3)*(cellSize+5)-cellSize, offsety+85+(tInd/3)*(cellSize+5));
 		}
 	}
 
@@ -367,11 +366,15 @@ public:
 		//moveToInd(63);
 		//srv.putSync();
 		//moveToAng(900,0);
-		take(13);
-		move(20,27);
-		makeKing(27);
-		//move(57,0);
-		//move(57,6);
+		
+		//take(25);
+		//makeKing(27);
+		
+		move(27,0);
+		move(27,6);
+		move(27,57);
+		move(27,63);
+		
 		//move(57,54);
 		//move(57,48);
 		//move(47,57);
@@ -433,12 +436,19 @@ public:
 	}
 	
 	// grab taken piece and put it a top of ind
-	void makeKing(uint8_t ind) {
+	void makeKing(uint8_t ind, uint8_t from = -1) {
 		motEn.clear();
-		moveToInd(--takeInd);
-		srv.grabSync();
-		moveToInd(ind);
-		srv.putSync();
+		if(from == -1) {
+			moveToInd(--takeInd);
+			srv.grabSync();
+			makeIndKing(ind);
+			srv.putSync();
+		} else {
+			moveToInd(from);
+			srv.grabSync();
+			makeIndKing(ind);
+			srv.putSync();
+		}
 		motEn.set();
 	}
 
@@ -463,6 +473,12 @@ public:
 
 
 private:
+	
+	void makeIndKing(uint8_t ind)
+	{
+		Angles a = calcAngles(ind);
+		moveToAng(a.ang0+10, a.ang1); // hack for avoid offset
+	}
 
 	void moveToInd(uint8_t ind)
 	{
@@ -492,8 +508,8 @@ private:
 
 	void autoHomeImp() {
 		//msg << "arm: homing" << m::tab;
-		m0.moveAngle(-1200, 10);
-		m1.moveAngle(1200, 8);
+		m0.moveAngle(-1150, 10);
+		m1.moveAngle(1150, 8);
 		m0.wait();
 		m1.stop();
 		//msg << "arm: m0 ready;" << m::tab;
@@ -853,10 +869,10 @@ class EmoCore
 					break;
 				case WakeUp: // say hello
 					voiceM.play(1, pgm_read_byte(&(hello[ind % sizeof(hello)])));
-					//voiceM.play(1, pgm_read_byte(&(hello[ind % sizeof(hello)])));
+					voiceM.play(1, pgm_read_byte(&(hello[ind % sizeof(hello)])));
 					voiceM.wait();
 					_delay_ms(1000);
-					//voiceM.play(1,pgm_read_byte(&(rules[0])));// always say rules
+					voiceM.play(1,pgm_read_byte(&(rules[0])));// always say rules
 					break;
 				case Waiting: // say smth, joke?
 					if(rand()%10 == 5) {
@@ -943,7 +959,7 @@ class HumanMoveDetector
 		}
 
 		void saveBoard() {
-			msg << "------- save board --------" << m::endl;
+			//msg << "------- save board --------" << m::endl;
 			prev = getState();
 		}
 
@@ -1144,7 +1160,7 @@ int main(void)
 
 	uart_init(0);
 	msg << m::endl << m::tab << "~ CBot v1.0 ~" << m::endl;
-	msg << "mem: " << (uint16_t)memfree() << "sizes:" << sizeof(Moves) << sizeof(Move2) << sizeof(Step) << m::endl;
+	//msg << "mem: " << (uint16_t)memfree() << "sizes:" << sizeof(Moves) << sizeof(Move2) << sizeof(Step) << m::endl;
 
 	// use eeprom for seed
 	uint16_t val = eeprom_read_word(0);
@@ -1155,6 +1171,7 @@ int main(void)
 
 	eyes.init();
 	arm.init();
+	//arm.test();
 	emoCore.say(EmoCore::Event::WakeUp);
 	eyes.randomNormal();
 
@@ -1175,14 +1192,14 @@ int main(void)
 	{
 		_delay_ms(100);
 		
-		msg << "game st is " << game.getState() << m::endl;
+		//msg << "game st is " << game.getState() << m::endl;
 
 		switch(game.getState())
 		{
 			case Game::WaitForBoardInit:
 				{
-					LoopDelay d10(10, true);
-					LoopDelay d100(10, false);
+					LoopDelay d10(20, true);
+					LoopDelay d100(4, false);
 					while(!moveDetector.isBoardInit()) {
 						if(d10) {
 							emoCore.say(EmoCore::Waiting);
@@ -1206,10 +1223,20 @@ int main(void)
 					Moves ms;
 					game.getTheirMove(ms);
 					if(!ms.size()) {
-						msg << "They have no moves!" << m::endl;
+						//msg << "They have no moves!" << m::endl;
 						if(game.doIWin()) {
 							eyes.show(Eyes::Curios);
 							emoCore.say(EmoCore::WinGame);
+							_delay_ms(1000);
+							emoCore.say(EmoCore::WinGame);
+							game.reset();
+							arm.init();
+						} else {
+							eyes.show(Eyes::Curios);
+							emoCore.say(EmoCore::YouHaveNoMove);
+							_delay_ms(1000);
+							emoCore.say(EmoCore::WinGame);
+							_delay_ms(1000);
 							game.reset();
 							arm.init();
 						}
@@ -1217,13 +1244,13 @@ int main(void)
 					}
 
 					// wait move started
-					LoopDelay ld20 (8, true);
+					LoopDelay ld20 (12, true);
 					while(!moveDetector.waitForMoveStarted()) {
 						if(ld20) {
 							emoCore.say(EmoCore::YourTurn);
 							_delay_ms(1000);
 						} else {
-							_delay_ms(3000);
+							_delay_ms(2000);
 							eyes.randomNormal();
 						}
 					}
@@ -1235,12 +1262,12 @@ int main(void)
 						// check board changes match moves
 						BoardDiff bdiff = moveDetector.getBoardDiff();
 						if(bdiff) {
-							msg << "diff: " << bdiff.up[0] << " to " << bdiff.down << m::endl;
+							//msg << "diff: " << bdiff.up[0] << " to " << bdiff.down << m::endl;
 							if(ms.size() && ms.hasTakes()) {
-								msg << "They have to take" << m::endl;
+								//msg << "They have to take" << m::endl;
 								Move2 m = bdiff.match(ms);
 								if(m) {
-									msg << "move recognized" << m::endl;
+									//msg << "move recognized" << m::endl;
 									game.applyTheirMove(m);
 									moveDetector.saveBoard();
 									_delay_ms(500);
@@ -1262,7 +1289,7 @@ int main(void)
 								break;
 							}
 						}
-						_delay_ms(300); //TODO
+						_delay_ms(300);
 					}
 				}
 				break;
@@ -1272,30 +1299,39 @@ int main(void)
 					// say smth
 					Move2 move = game.getMyMove();
 					if(move) {
-						msg << "find my move " << move.getFrom() << move.front().to << m::endl;
+						//msg << "find my move " << move.getFrom() << move.front().to << m::endl;
 						bool hasTake = false;
 						arm.move(move.getFrom(),move.getStep(move.size()-1).to);
+
+						bool needPlaceKing = move.becameKing();
+
 						for(uint8_t i = 0; i < move.size(); ++i) {
 							Step s = move.getStep(i);
 							if(s.take != -1) {
-								arm.take(s.take);
+								if(needPlaceKing) {
+									arm.makeKing(move.front().to, s.take);
+									needPlaceKing = false;
+								} else {
+									arm.take(s.take);
+								}
 								hasTake = true;
 							}
-							if(s.becameKing) {
-								arm.makeKing(move.getStep(move.size()-1).to);
+							if(needPlaceKing) {
+								arm.makeKing(move.front().to);
 							}
 						}
+
 						if(hasTake) {
 							emoCore.say(EmoCore::WinPieces);
 						} else {
 							emoCore.say(EmoCore::IMove);
 						} 
-						arm.home();
 						moveDetector.saveBoard();
+						arm.home();
 						_delay_ms(500);
 						game.myMoveApplyed(move);
 					} else {
-						msg << "MyMove: find bad move..." << m::endl;
+						//msg << "MyMove:no move" << m::endl;
 						eyes.show(Eyes::Anger);
 						if(!game.doTheirWin()) {
 							emoCore.say(EmoCore::GiveUp);
